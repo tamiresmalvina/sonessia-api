@@ -1,0 +1,22 @@
+# Dependências
+node_modules
+
+# Variáveis de ambiente
+.env
+.env.*
+!.env.example
+
+# Prisma Client gerado
+/generated/prisma
+
+# Configurações locais de ferramentas
+.agents/
+.claude/
+.windsurf/
+
+# Logs
+*.log
+
+# Sistema operacional
+.DS_Store
+Thumbs.db

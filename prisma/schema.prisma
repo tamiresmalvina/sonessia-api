@@ -1,0 +1,112 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Perfil {
+  COMUM
+  ADMIN
+}
+
+enum Finalidade {
+  ESTUDO
+  RELAXAMENTO
+  SONO
+  MEDITACAO
+  CONCENTRACAO
+  TRABALHO
+}
+
+enum CategoriaAudio {
+  NATUREZA
+  AMBIENTE
+  INSTRUMENTAL
+  RUIDO
+}
+
+model Usuario {
+  id             String   @id @default(uuid())  @db.Uuid
+  nome           String
+  email          String   @unique
+  senha          String
+  dataNascimento DateTime
+  fotoPerfil     String?
+  perfil         Perfil
+
+  colecoes         Colecao[]
+  ambientesSonoros AmbienteSonoro[]
+  audios           Audio[]
+}
+
+model Colecao {
+  idColecao String @id @default(uuid()) @db.Uuid
+  idUsuario String  @db.Uuid
+  nome      String
+  descricao String?
+
+  usuario Usuario @relation(fields: [idUsuario], references: [id])
+
+  ambientesSonoros ColecaoAmbienteSonoro[]
+}
+
+model AmbienteSonoro {
+  idAmbienteSonoro     String   @id @default(uuid()) @db.Uuid
+  idUsuario            String  @db.Uuid
+  nome                 String
+  descricao            String?
+  finalidade           Finalidade
+  origem               String
+  imagem               String?
+  autorImagem          String?
+  tituloOriginalImagem String?
+  fonteImagem          String?
+  licencaImagem        String?
+  dataCriacao          DateTime @default(now())
+
+  usuario Usuario @relation(fields: [idUsuario], references: [id])
+
+  colecoes ColecaoAmbienteSonoro[]
+  audios   AmbienteSonoroAudio[]
+}
+
+model Audio {
+  idAudio        String @id @default(uuid())  @db.Uuid
+  idUsuario      String  @db.Uuid
+  nome           String
+  descricao      String?
+  categoria      CategoriaAudio
+  arquivo        String
+  titulo         String
+  tituloOriginal String
+  fonte          String
+  licenca        String
+
+  usuario Usuario @relation(fields: [idUsuario], references: [id])
+
+  ambientesSonoros AmbienteSonoroAudio[]
+}
+
+model ColecaoAmbienteSonoro {
+  idColecao        String  @db.Uuid
+  idAmbienteSonoro String  @db.Uuid
+
+  colecao        Colecao        @relation(fields: [idColecao], references: [idColecao])
+  ambienteSonoro AmbienteSonoro @relation(fields: [idAmbienteSonoro], references: [idAmbienteSonoro])
+
+  @@id([idColecao, idAmbienteSonoro])
+}
+
+model AmbienteSonoroAudio {
+  idAmbienteSonoro String  @db.Uuid
+  idAudio          String  @db.Uuid
+  volume           Int
+
+  ambienteSonoro AmbienteSonoro @relation(fields: [idAmbienteSonoro], references: [idAmbienteSonoro])
+  audio          Audio          @relation(fields: [idAudio], references: [idAudio])
+
+  @@id([idAmbienteSonoro, idAudio])
+}

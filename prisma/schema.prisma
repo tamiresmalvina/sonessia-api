@@ -12,6 +12,13 @@ enum Perfil {
   ADMIN
 }
 
+enum StatusSessao {
+  ATIVA
+  ROTACIONADA
+  ENCERRADA
+  REVOGADA
+}
+
 enum Finalidade {
   ESTUDO
   RELAXAMENTO
@@ -29,21 +36,53 @@ enum CategoriaAudio {
 }
 
 model Usuario {
-  id             String   @id @default(uuid())  @db.Uuid
-  nome           String
-  email          String   @unique
-  senha          String
-  dataNascimento DateTime
-  fotoPerfil     String?
-  perfil         Perfil
+  id              String   @id @default(uuid()) @db.Uuid
+  nome            String
+  email           String   @unique
+  senha           String
+  dataNascimento  DateTime
+  fotoPerfil      String?
+  perfil          Perfil   @default(COMUM)
+  emailVerificado Boolean  @default(false)
 
-  colecoes         Colecao[]
-  ambientesSonoros AmbienteSonoro[]
-  audios           Audio[]
+  colecoes           Colecao[]
+  ambientesSonoros   AmbienteSonoro[]
+  audios             Audio[]
+  codigosVerificacao CodigoVerificacaoEmail[]
+  sessoes            Sessao[]
+}
+
+model CodigoVerificacaoEmail {
+  id         String   @id @default(uuid()) @db.Uuid
+  idUsuario  String   @db.Uuid
+  codigoHash String
+  tentativas Int      @default(0)
+  expiraEm   DateTime
+  usado      Boolean  @default(false)
+  criadoEm   DateTime @default(now())
+
+  usuario Usuario @relation(fields: [idUsuario], references: [id], onDelete: Cascade)
+
+  @@index([idUsuario])
+}
+
+model Sessao {
+  id             String       @id @default(uuid()) @db.Uuid
+  idUsuario      String       @db.Uuid
+  tokenHash      String       @unique
+  status         StatusSessao @default(ATIVA)
+  substituidaPor String?      @db.Uuid
+  expiraEm       DateTime
+  criadoEm       DateTime     @default(now())
+  atualizadoEm   DateTime     @updatedAt
+
+  usuario Usuario @relation(fields: [idUsuario], references: [id], onDelete: Cascade)
+
+  @@index([idUsuario])
 }
 
 model Colecao {
-  idColecao String @id @default(uuid()) @db.Uuid
+  idColecao String  @id @default(uuid()) @db.Uuid
   idUsuario String  @db.Uuid
   nome      String
   descricao String?
@@ -54,8 +93,8 @@ model Colecao {
 }
 
 model AmbienteSonoro {
-  idAmbienteSonoro     String   @id @default(uuid()) @db.Uuid
-  idUsuario            String  @db.Uuid
+  idAmbienteSonoro     String     @id @default(uuid()) @db.Uuid
+  idUsuario            String     @db.Uuid
   nome                 String
   descricao            String?
   finalidade           Finalidade
@@ -65,7 +104,7 @@ model AmbienteSonoro {
   tituloOriginalImagem String?
   fonteImagem          String?
   licencaImagem        String?
-  dataCriacao          DateTime @default(now())
+  dataCriacao          DateTime   @default(now())
 
   usuario Usuario @relation(fields: [idUsuario], references: [id])
 
@@ -74,8 +113,8 @@ model AmbienteSonoro {
 }
 
 model Audio {
-  idAudio        String @id @default(uuid())  @db.Uuid
-  idUsuario      String  @db.Uuid
+  idAudio        String         @id @default(uuid()) @db.Uuid
+  idUsuario      String         @db.Uuid
   nome           String
   descricao      String?
   categoria      CategoriaAudio
@@ -91,8 +130,8 @@ model Audio {
 }
 
 model ColecaoAmbienteSonoro {
-  idColecao        String  @db.Uuid
-  idAmbienteSonoro String  @db.Uuid
+  idColecao        String @db.Uuid
+  idAmbienteSonoro String @db.Uuid
 
   colecao        Colecao        @relation(fields: [idColecao], references: [idColecao])
   ambienteSonoro AmbienteSonoro @relation(fields: [idAmbienteSonoro], references: [idAmbienteSonoro])
@@ -101,8 +140,8 @@ model ColecaoAmbienteSonoro {
 }
 
 model AmbienteSonoroAudio {
-  idAmbienteSonoro String  @db.Uuid
-  idAudio          String  @db.Uuid
+  idAmbienteSonoro String @db.Uuid
+  idAudio          String @db.Uuid
   volume           Int
 
   ambienteSonoro AmbienteSonoro @relation(fields: [idAmbienteSonoro], references: [idAmbienteSonoro])

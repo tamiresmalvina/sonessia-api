@@ -4,8 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prisma:status": "prisma migrate status --config prisma7.config.ts",
+    "prisma:generate": "prisma generate --config prisma7.config.ts",
     "seed": "tsx prisma/seed.ts"
   },
   "keywords": [],

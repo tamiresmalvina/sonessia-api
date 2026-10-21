@@ -7,18 +7,23 @@ async function iniciarServidor(): Promise<void> {
     const porta = ambiente.PORT;
 
     const servidor = app.listen(porta, () => {
-      console.log(`Servidor rodando na porta ${porta} [ambiente: ${ambiente.NODE_ENV}]`);
+      console.log(
+        `Servidor rodando na porta ${porta} [ambiente: ${ambiente.NODE_ENV}]`,
+      );
     });
 
     const encerrar = async (sinal: string): Promise<void> => {
-      console.log(`\nRecebido sinal ${sinal}. Encerrando o servidor de forma graciosa...`);
+      console.log(`\nRecebido sinal ${sinal}. Encerrando o servidor...`);
       servidor.close(async () => {
         try {
           await prisma.$disconnect();
           console.log("Conexões encerradas com sucesso.");
           process.exit(0);
         } catch (erroDesconexao) {
-          console.error("Erro ao desconectar do banco de dados:", erroDesconexao);
+          console.error(
+            "Erro ao desconectar do banco de dados:",
+            erroDesconexao,
+          );
           process.exit(1);
         }
       });

@@ -14,8 +14,12 @@ export const schemaCadastro = z.object({
     .max(255, "O e-mail deve ter no máximo 255 caracteres."),
   senha: z
     .string()
-    .min(10, "A senha deve ter no mínimo 10 caracteres.")
-    .max(128, "A senha deve ter no máximo 128 caracteres."),
+    .min(8, "A senha deve ter no mínimo 8 caracteres.")
+    .max(128, "A senha deve ter no máximo 128 caracteres.")
+    .regex(/\p{Lu}/u, "A senha deve conter pelo menos uma letra maiúscula.")
+    .regex(/\p{Ll}/u, "A senha deve conter pelo menos uma letra minúscula.")
+    .regex(/[0-9]/, "A senha deve conter pelo menos um número.")
+    .regex(/[\p{P}\p{S}]/u, "A senha deve conter pelo menos um símbolo."),
   dataNascimento: z
     .string()
     .refine((val) => !isNaN(Date.parse(val)), "Data de nascimento inválida.")

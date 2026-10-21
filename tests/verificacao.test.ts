@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
 import { app } from "../src/app.js";
 import { prisma } from "../lib/prisma.js";
 import { definirInterceptadorEmailTeste } from "../src/utils/email.util.js";
+import { reenviarCodigoVerificacao } from "../src/services/autenticacao.service.js";
 
 describe("Fluxo de Verificação e Reenvio de Código", () => {
   const prefixoTeste = "test_verif_";
@@ -25,14 +26,12 @@ describe("Fluxo de Verificação e Reenvio de Código", () => {
 
   async function cadastrarUsuarioTeste(sufixo: string) {
     const email = `${prefixoTeste}${sufixo}_${Date.now()}@teste.com`;
-    const resposta = await request(app)
-      .post("/autenticacao/cadastro")
-      .send({
-        nome: "Usuario Teste Verificacao",
-        email,
-        senha: "SenhaSeguraForte@123",
-        dataNascimento: "1993-08-20",
-      });
+    const resposta = await request(app).post("/autenticacao/cadastro").send({
+      nome: "Usuario Teste Verificacao",
+      email,
+      senha: "SenhaSeguraForte@123",
+      dataNascimento: "1993-08-20",
+    });
 
     return { email, codigo: ultimoCodigoCapturado, resposta };
   }
@@ -48,7 +47,9 @@ describe("Fluxo de Verificação e Reenvio de Código", () => {
       expect(resposta.status).toBe(200);
       expect(resposta.body.mensagem).toContain("verificado com sucesso");
 
-      const usuarioBanco = await prisma.usuario.findUnique({ where: { email } });
+      const usuarioBanco = await prisma.usuario.findUnique({
+        where: { email },
+      });
       expect(usuarioBanco?.emailVerificado).toBe(true);
 
       const codigoBanco = await prisma.codigoVerificacaoEmail.findFirst({
@@ -92,7 +93,9 @@ describe("Fluxo de Verificação e Reenvio de Código", () => {
         .send({ email, codigo: "111111" });
 
       expect(quintaResposta.status).toBe(400);
-      expect(quintaResposta.body.erro.codigo).toBe("LIMITE_TENTATIVAS_EXCEDIDO");
+      expect(quintaResposta.body.erro.codigo).toBe(
+        "LIMITE_TENTATIVAS_EXCEDIDO",
+      );
 
       const codigoBanco = await prisma.codigoVerificacaoEmail.findFirst({
         where: { usuario: { email } },
@@ -117,7 +120,9 @@ describe("Fluxo de Verificação e Reenvio de Código", () => {
       expect(resposta.status).toBe(400);
       expect(resposta.body.erro.codigo).toBe("CODIGO_EXPIRADO");
 
-      const usuarioBanco = await prisma.usuario.findUnique({ where: { email } });
+      const usuarioBanco = await prisma.usuario.findUnique({
+        where: { email },
+      });
       expect(usuarioBanco?.emailVerificado).toBe(false);
     });
 
@@ -142,7 +147,9 @@ describe("Fluxo de Verificação e Reenvio de Código", () => {
 
       // Dispara 5 requisições de verificação exatamente ao mesmo tempo com o mesmo código
       const promessas = Array.from({ length: 5 }).map(() =>
-        request(app).post("/autenticacao/verificar-email").send({ email, codigo })
+        request(app)
+          .post("/autenticacao/verificar-email")
+          .send({ email, codigo }),
       );
 
       const resultados = await Promise.all(promessas);
@@ -153,6 +160,69 @@ describe("Fluxo de Verificação e Reenvio de Código", () => {
 
       expect(sucessos.length).toBe(1);
       expect(falhas.length).toBe(4);
+    });
+
+    it("tentativas simultâneas de verificação não ultrapassam o limite de cinco tentativas", async () => {
+      const { email } = await cadastrarUsuarioTeste("tentativas_concorrentes");
+
+      // Dispara 8 requisições simultâneas com código incorreto
+      const promessas = Array.from({ length: 8 }).map(() =>
+        request(app)
+          .post("/autenticacao/verificar-email")
+          .send({ email, codigo: "000000" }),
+      );
+
+      const resultados = await Promise.all(promessas);
+
+      // Todas devem falhar com 400 (seja CODIGO_INCORRETO ou LIMITE_TENTATIVAS_EXCEDIDO)
+      for (const res of resultados) {
+        expect(res.status).toBe(400);
+      }
+
+      // No banco de dados, o número total de tentativas NUNCA pode exceder 5
+      const codigoBanco = await prisma.codigoVerificacaoEmail.findFirst({
+        where: { usuario: { email } },
+        orderBy: { criadoEm: "desc" },
+      });
+
+      expect(codigoBanco).not.toBeNull();
+      expect(codigoBanco?.tentativas).toBe(5);
+      expect(codigoBanco?.usado).toBe(true);
+    });
+
+    it("garante que apenas um código válido exista por usuário e códigos anteriores invalidados sejam rejeitados", async () => {
+      const { email, codigo: primeiroCodigo } =
+        await cadastrarUsuarioTeste("unico_valido");
+
+      // Avança a data para contornar o cooldown e permitir reenvio
+      await prisma.codigoVerificacaoEmail.updateMany({
+        where: { usuario: { email } },
+        data: { criadoEm: new Date(Date.now() - 70 * 1000) },
+      });
+
+      await request(app).post("/autenticacao/reenviar-codigo").send({ email });
+
+      const segundoCodigo = ultimoCodigoCapturado;
+      expect(segundoCodigo).not.toBe(primeiroCodigo);
+
+      // O primeiro código foi invalidado e não pode ser aceito
+      const resPrimeiro = await request(app)
+        .post("/autenticacao/verificar-email")
+        .send({ email, codigo: primeiroCodigo });
+
+      expect(resPrimeiro.status).toBe(400);
+
+      // Apenas o segundo código funciona para verificar a conta
+      const resSegundo = await request(app)
+        .post("/autenticacao/verificar-email")
+        .send({ email, codigo: segundoCodigo });
+
+      expect(resSegundo.status).toBe(200);
+
+      const usuarioBanco = await prisma.usuario.findUnique({
+        where: { email },
+      });
+      expect(usuarioBanco?.emailVerificado).toBe(true);
     });
   });
 
@@ -170,7 +240,8 @@ describe("Fluxo de Verificação e Reenvio de Código", () => {
     });
 
     it("reenvio válido invalida o código anterior e gera um novo código funcional", async () => {
-      const { email, codigo: primeiroCodigo } = await cadastrarUsuarioTeste("reenvio_valido");
+      const { email, codigo: primeiroCodigo } =
+        await cadastrarUsuarioTeste("reenvio_valido");
 
       // Simula passagem de tempo de 65 segundos no código anterior
       await prisma.codigoVerificacaoEmail.updateMany({
@@ -235,7 +306,7 @@ describe("Fluxo de Verificação e Reenvio de Código", () => {
 
       // Dispara 4 requisições de reenvio simultâneas
       const promessas = Array.from({ length: 4 }).map(() =>
-        request(app).post("/autenticacao/reenviar-codigo").send({ email })
+        request(app).post("/autenticacao/reenviar-codigo").send({ email }),
       );
 
       const resultados = await Promise.all(promessas);
@@ -246,6 +317,58 @@ describe("Fluxo de Verificação e Reenvio de Código", () => {
 
       expect(sucessos.length).toBe(1);
       expect(limitados.length).toBe(3);
+    });
+
+    it("interrompe reenvio dentro da transação se a conta já foi verificada após o bloqueio", async () => {
+      const { email } = await cadastrarUsuarioTeste("corrida_transacao");
+
+      await prisma.codigoVerificacaoEmail.updateMany({
+        where: { usuario: { email } },
+        data: { criadoEm: new Date(Date.now() - 70 * 1000) },
+      });
+
+      const usuarioAntes = await prisma.usuario.findUnique({
+        where: { email },
+      });
+      expect(usuarioAntes).not.toBeNull();
+
+      let interceptadorEnvioChamado = false;
+      definirInterceptadorEmailTeste(async () => {
+        interceptadorEnvioChamado = true;
+        return { sucesso: true, mensagemId: "mock" };
+      });
+
+      // Simula que a primeira consulta (fora da transação) viu emailVerificado = false
+      const findUniqueOriginal = prisma.usuario.findUnique.bind(prisma.usuario);
+      vi.spyOn(prisma.usuario, "findUnique").mockImplementationOnce((async (
+        args: any,
+      ) => {
+        const u = await findUniqueOriginal(args);
+        return (u ? { ...u, emailVerificado: false } : null) as any;
+      }) as any);
+
+      // Atualiza o usuário no banco como já verificado
+      await prisma.usuario.update({
+        where: { id: usuarioAntes!.id },
+        data: { emailVerificado: true },
+      });
+
+      const contagemCodigosAntes = await prisma.codigoVerificacaoEmail.count({
+        where: { idUsuario: usuarioAntes!.id },
+      });
+
+      await expect(reenviarCodigoVerificacao({ email })).rejects.toMatchObject({
+        statusCode: 400,
+        codigo: "EMAIL_JA_VERIFICADO",
+      });
+
+      const contagemCodigosDepois = await prisma.codigoVerificacaoEmail.count({
+        where: { idUsuario: usuarioAntes!.id },
+      });
+
+      // Não cria novo código nem envia e-mail
+      expect(contagemCodigosDepois).toBe(contagemCodigosAntes);
+      expect(interceptadorEnvioChamado).toBe(false);
     });
   });
 });

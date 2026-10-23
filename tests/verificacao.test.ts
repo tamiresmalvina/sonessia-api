@@ -1,13 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from "vitest";
 import request from "supertest";
 import { app } from "../src/app.js";
 import { prisma } from "../lib/prisma.js";
 import { definirInterceptadorEmailTeste } from "../src/utils/email.util.js";
 import { reenviarCodigoVerificacao } from "../src/services/autenticacao.service.js";
+import { garantirBancoTestesIsolado } from "./helpers/isolamento-banco.helper.js";
 
 describe("Fluxo de Verificação e Reenvio de Código", () => {
   const prefixoTeste = "test_verif_";
   let ultimoCodigoCapturado = "";
+
+  beforeAll(async () => {
+    await garantirBancoTestesIsolado();
+  });
 
   beforeEach(() => {
     ultimoCodigoCapturado = "";

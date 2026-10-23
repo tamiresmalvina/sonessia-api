@@ -1,12 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll } from "vitest";
 import request from "supertest";
 import { app } from "../src/app.js";
 import { prisma } from "../lib/prisma.js";
 import { verificarSenha } from "../src/utils/senha.util.js";
 import { definirInterceptadorEmailTeste } from "../src/utils/email.util.js";
+import { garantirBancoTestesIsolado } from "./helpers/isolamento-banco.helper.js";
 
 describe("Fluxo de Cadastro — POST /autenticacao/cadastro", () => {
   const prefixoTeste = "test_cad_";
+
+  beforeAll(async () => {
+    await garantirBancoTestesIsolado();
+  });
 
   beforeEach(async () => {
     definirInterceptadorEmailTeste(null);

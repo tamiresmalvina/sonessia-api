@@ -56,3 +56,49 @@ export const schemaReenviarCodigo = z.object({
 });
 
 export type EntradaReenviarCodigo = z.infer<typeof schemaReenviarCodigo>;
+
+export const schemaLogin = z.object({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("E-mail em formato inválido.")
+    .max(255, "O e-mail deve ter no máximo 255 caracteres."),
+  senha: z
+    .string()
+    .min(1, "A senha é obrigatória.")
+    .max(128, "A senha deve ter no máximo 128 caracteres."),
+});
+
+export type EntradaLogin = z.infer<typeof schemaLogin>;
+
+export const schemaSolicitarRecuperacaoSenha = z.object({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email("E-mail em formato inválido.")
+    .max(255, "O e-mail deve ter no máximo 255 caracteres."),
+});
+
+export type EntradaSolicitarRecuperacaoSenha = z.infer<typeof schemaSolicitarRecuperacaoSenha>;
+
+export const schemaSenhaForte = z
+  .string()
+  .min(8, "A senha deve ter no mínimo 8 caracteres.")
+  .max(128, "A senha deve ter no máximo 128 caracteres.")
+  .regex(/\p{Lu}/u, "A senha deve conter pelo menos uma letra maiúscula.")
+  .regex(/\p{Ll}/u, "A senha deve conter pelo menos uma letra minúscula.")
+  .regex(/[0-9]/, "A senha deve conter pelo menos um número.")
+  .regex(/[\p{P}\p{S}]/u, "A senha deve conter pelo menos um símbolo.");
+
+export const schemaRedefinirSenha = z.object({
+  token: z
+    .string()
+    .trim()
+    .regex(/^[0-9a-fA-F]{64}$/, "Token de recuperação em formato inválido."),
+  novaSenha: schemaSenhaForte,
+});
+
+export type EntradaRedefinirSenha = z.infer<typeof schemaRedefinirSenha>;
+

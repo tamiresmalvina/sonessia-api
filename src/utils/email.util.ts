@@ -24,6 +24,13 @@ export interface ParametrosEnvioRecuperacaoSenha {
   token: string;
 }
 
+export interface ParametrosEnvioConfirmacaoAlteracaoEmail {
+  destinatario: string;
+  nome: string;
+  token: string;
+  etapa: "atual" | "novo";
+}
+
 // Handler customizado permitindo injeção/mock para testes automatizados
 let transportadorCustomizado: Transporter | null = null;
 let transportadorPadrao: Transporter | null = null;
@@ -31,6 +38,9 @@ let provedorPadraoInstanciado: string | null = null;
 let interceptadorTeste: ((parametros: ParametrosEnvioCodigo) => Promise<ResultadoEnvioEmail>) | null = null;
 let interceptadorRecuperacaoTeste:
   | ((parametros: ParametrosEnvioRecuperacaoSenha) => Promise<ResultadoEnvioEmail>)
+  | null = null;
+let interceptadorAlteracaoEmailTeste:
+  | ((parametros: ParametrosEnvioConfirmacaoAlteracaoEmail) => Promise<ResultadoEnvioEmail>)
   | null = null;
 let forcarExecucaoEtherealEmTestes = false;
 
@@ -44,6 +54,14 @@ export function definirInterceptadorRecuperacaoTeste(
   fn: ((parametros: ParametrosEnvioRecuperacaoSenha) => Promise<ResultadoEnvioEmail>) | null
 ): void {
   interceptadorRecuperacaoTeste = fn;
+}
+
+export function definirInterceptadorAlteracaoEmailTeste(
+  fn:
+    | ((parametros: ParametrosEnvioConfirmacaoAlteracaoEmail) => Promise<ResultadoEnvioEmail>)
+    | null
+): void {
+  interceptadorAlteracaoEmailTeste = fn;
 }
 
 export function definirForcarExecucaoEtherealEmTestes(forcar: boolean): void {
@@ -422,3 +440,145 @@ export async function enviarEmailRecuperacaoSenha(
   }
 }
 
+export async function enviarEmailConfirmacaoAlteracaoEmail(
+  parametros: ParametrosEnvioConfirmacaoAlteracaoEmail
+): Promise<ResultadoEnvioEmail> {
+  if (interceptadorAlteracaoEmailTeste) {
+    return await interceptadorAlteracaoEmailTeste(parametros);
+  }
+
+  if (ambiente.NODE_ENV === "test" && !forcarExecucaoEtherealEmTestes) {
+    return {
+      sucesso: true,
+      status: "ENVIADO",
+      mensagemId: "mock-test-alteracao-email-id",
+    };
+  }
+
+  if (ambiente.NODE_ENV === "production" && !transportadorCustomizado) {
+    return {
+      sucesso: false,
+      status: "FALHA_ENVIO",
+      motivo: "PROVEDOR_NAO_PERMITIDO_EM_PRODUCAO",
+    };
+  }
+
+  let transportador: Transporter;
+  try {
+    transportador = await obterTransportador();
+  } catch (erro) {
+    console.error(
+      "[ERRO_TRANSPORTE_ALTERACAO_EMAIL]: Não foi possível inicializar o transporte de e-mail.",
+      erro instanceof Error ? erro.message : erro
+    );
+    return {
+      sucesso: false,
+      status: "FALHA_ENVIO",
+      motivo: "FALHA_INICIALIZACAO_TRANSPORTE",
+    };
+  }
+
+  const opcoesTransportador = (transportador as unknown as {
+    options?: { jsonTransport?: boolean };
+  }).options;
+  if (opcoesTransportador?.jsonTransport) {
+    return {
+      sucesso: false,
+      status: "FALHA_ENVIO",
+      motivo: "TRANSPORTE_JSON_NAO_PERMITIDO",
+    };
+  }
+
+  const confirmacaoDoEmailAtual = parametros.etapa === "atual";
+  const descricaoEtapa = confirmacaoDoEmailAtual ? "e-mail atual" : "novo e-mail";
+  const assunto = confirmacaoDoEmailAtual
+    ? "Confirme a alteração do seu e-mail — Sonessia"
+    : "Confirme seu novo e-mail — Sonessia";
+
+  try {
+    const nomeHtml = escaparHtml(parametros.nome);
+    const tokenHtml = escaparHtml(parametros.token);
+    const texto = confirmacaoDoEmailAtual
+      ? `Olá, ${parametros.nome}!\n\nRecebemos uma solicitação para alterar o e-mail da sua conta. Para confirmar que você controla o e-mail atual, informe este token na API: ${parametros.token}\n\nEste token expira em 15 minutos e pode ser usado uma única vez. Se você não solicitou a alteração, ignore esta mensagem.`
+      : `Olá, ${parametros.nome}!\n\nPara confirmar que você controla este novo endereço de e-mail, informe este token na API: ${parametros.token}\n\nEste token expira em 15 minutos e pode ser usado uma única vez. Se você não solicitou a alteração, ignore esta mensagem.`;
+
+    const info = await transportador.sendMail({
+      from: '"Sonessia" <nao-responda@sonessia.com>',
+      to: parametros.destinatario,
+      subject: assunto,
+      text: texto,
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2>Confirmação de ${descricaoEtapa} — Sonessia</h2>
+          <p>Olá, <strong>${nomeHtml}</strong>!</p>
+          <p>Informe o token abaixo na API para confirmar a posse do ${descricaoEtapa}:</p>
+          <div style="background-color: #f4f4f5; padding: 15px; font-size: 16px; font-weight: bold; overflow-wrap: anywhere; text-align: center; border-radius: 8px;">
+            ${tokenHtml}
+          </div>
+          <p style="color: #71717a; font-size: 14px; margin-top: 15px;">
+            Este token expira em 15 minutos e pode ser usado uma única vez.<br>
+            Se você não solicitou esta alteração, ignore esta mensagem.
+          </p>
+        </div>
+      `,
+    });
+
+    if (info.rejected && info.rejected.length > 0) {
+      return {
+        sucesso: false,
+        status: "FALHA_ENVIO",
+        mensagemId: info.messageId,
+        motivo: "DESTINATARIO_REJEITADO",
+      };
+    }
+
+    const destinatarioAceito =
+      Array.isArray(info.accepted) &&
+      info.accepted.some((dest) =>
+        typeof dest === "string"
+          ? dest.toLowerCase() === parametros.destinatario.toLowerCase()
+          : (dest as { address?: string }).address?.toLowerCase() ===
+            parametros.destinatario.toLowerCase()
+      );
+
+    if (!destinatarioAceito) {
+      return {
+        sucesso: false,
+        status: "INCERTO",
+        mensagemId: info.messageId,
+        motivo: "RESPOSTA_SMTP_SEM_CONFIRMACAO_DESTINATARIO",
+      };
+    }
+
+    if (typeof info.response !== "string" || !info.response.trim().startsWith("250")) {
+      return {
+        sucesso: false,
+        status: "INCERTO",
+        mensagemId: info.messageId,
+        motivo: "RESPOSTA_SMTP_NAO_POSITIVA",
+      };
+    }
+
+    if (ambiente.EMAIL_PROVIDER === "mailpit" && ambiente.NODE_ENV === "development") {
+      console.log("[E-mail Mailpit enviado]: Visualização disponível na interface do Mailpit.");
+    }
+
+    return {
+      sucesso: true,
+      status: "ENVIADO",
+      mensagemId: info.messageId,
+    };
+  } catch (erro) {
+    const mensagemErro = erro instanceof Error ? erro.message : String(erro);
+    console.error("[ERRO_ENVIO_ALTERACAO_EMAIL]: Falha ao enviar e-mail de confirmação.");
+    return {
+      sucesso: false,
+      status: /timeout|timed out|ETIMEDOUT|ESOCKET/i.test(mensagemErro)
+        ? "INCERTO"
+        : "FALHA_ENVIO",
+      motivo: /timeout|timed out|ETIMEDOUT|ESOCKET/i.test(mensagemErro)
+        ? "TIMEOUT_RESPOSTA_SERVIDOR"
+        : "ERRO_DISPARO_SMTP",
+    };
+  }
+}

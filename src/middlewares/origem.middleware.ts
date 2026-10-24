@@ -7,7 +7,7 @@ import { AppError } from "../errors/app.error.js";
  *
  * Em produção:
  * - A ausência do cabeçalho Origin é estritamente rejeitada (HTTP 403).
- * - A divergência em relação a FRONTEND_ORIGIN (quando configurada) é rejeitada (HTTP 403).
+ * - A ausência de FRONTEND_ORIGIN ou a divergência em relação a ela é rejeitada (HTTP 403).
  *
  * Fora de produção:
  * - Se o cabeçalho Origin for enviado e FRONTEND_ORIGIN estiver definido, a divergência é rejeitada.
@@ -18,6 +18,14 @@ export function validarOrigemMutacao(req: Request, _res: Response, next: NextFun
 
   if (ambiente.NODE_ENV === "production" && !origin) {
     throw new AppError(403, "ORIGEM_INVALIDA", "Cabeçalho de origem obrigatório em produção.");
+  }
+
+  if (ambiente.NODE_ENV === "production" && !ambiente.FRONTEND_ORIGIN) {
+    throw new AppError(
+      403,
+      "ORIGEM_NAO_CONFIGURADA",
+      "A origem autorizada não está configurada."
+    );
   }
 
   if (origin && ambiente.FRONTEND_ORIGIN && origin !== ambiente.FRONTEND_ORIGIN) {

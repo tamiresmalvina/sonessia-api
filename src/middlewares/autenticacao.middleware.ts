@@ -61,6 +61,8 @@ export async function autenticar(
         emailVerificado: true,
         versaoToken: true,
         senhaAlteradaEm: true,
+        fotoPerfilPublicId: true,
+        exclusaoDefinitivaEm: true,
       },
     });
 
@@ -73,6 +75,14 @@ export async function autenticar(
         403,
         "EMAIL_NAO_VERIFICADO",
         "Conta com e-mail não verificado."
+      );
+    }
+
+    if (usuario.exclusaoDefinitivaEm) {
+      throw new AppError(
+        403,
+        "CONTA_EXCLUSAO_PENDENTE",
+        "A conta está pendente de exclusão e não pode ser utilizada."
       );
     }
 

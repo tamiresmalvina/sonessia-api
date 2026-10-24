@@ -13,7 +13,11 @@ import {
 import { ambiente, validarAmbiente } from "../src/config/ambiente.js";
 
 describe("Envio de E-mail — Provedor Ethereal e Validações de Transporte", () => {
+  let ambienteOriginalProvider: typeof ambiente.EMAIL_PROVIDER;
+
   beforeEach(() => {
+    ambienteOriginalProvider = ambiente.EMAIL_PROVIDER;
+    (ambiente as Record<string, unknown>).EMAIL_PROVIDER = "ethereal";
     definirInterceptadorEmailTeste(null);
     definirTransportadorCustomizado(null);
     resetarTransportadorEthereal();
@@ -22,6 +26,7 @@ describe("Envio de E-mail — Provedor Ethereal e Validações de Transporte", (
   });
 
   afterEach(() => {
+    (ambiente as Record<string, unknown>).EMAIL_PROVIDER = ambienteOriginalProvider;
     definirInterceptadorEmailTeste(null);
     definirTransportadorCustomizado(null);
     resetarTransportadorEthereal();

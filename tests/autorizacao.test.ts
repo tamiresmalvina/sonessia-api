@@ -28,6 +28,8 @@ describe("Autorização RBAC — Middleware exigirPerfil", () => {
             emailVerificado: true,
             versaoToken: 1,
             senhaAlteradaEm: null,
+            fotoPerfilPublicId: null,
+            exclusaoDefinitivaEm: null,
           };
         } else if (perfilHeader === "COMUM") {
           req.usuario = {
@@ -38,6 +40,8 @@ describe("Autorização RBAC — Middleware exigirPerfil", () => {
             emailVerificado: true,
             versaoToken: 1,
             senhaAlteradaEm: null,
+            fotoPerfilPublicId: null,
+            exclusaoDefinitivaEm: null,
           };
         }
         next();

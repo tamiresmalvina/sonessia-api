@@ -1,8 +1,10 @@
 import { Router } from "express";
 import * as controladorAutenticacao from "../controllers/autenticacao.controller.js";
+import * as controladorFotoPerfil from "../controllers/foto-perfil.controller.js";
 import { validarCorpo } from "../middlewares/validacao.middleware.js";
 import { validarOrigemMutacao } from "../middlewares/origem.middleware.js";
 import { autenticar } from "../middlewares/autenticacao.middleware.js";
+import { receberFotoPerfil } from "../middlewares/foto-perfil.middleware.js";
 import {
   limiteCadastro,
   limiteVerificacao,
@@ -11,17 +13,38 @@ import {
   limiteRenovacaoSessao,
   limiteSolicitacaoRecuperacao,
   limiteRedefinicaoSenha,
+  limiteSolicitarAlteracaoEmail,
+  limiteConfirmarAlteracaoEmail,
+  limiteExclusaoConta,
+  limiteReativacaoConta,
+  limiteUploadFotoPerfil,
+  limiteVisualizacaoFotoPerfil,
+  limiteRemocaoFotoPerfil,
 } from "../middlewares/rate-limit.middleware.js";
 import {
   schemaCadastro,
   schemaVerificarEmail,
   schemaReenviarCodigo,
   schemaLogin,
+  schemaAtualizarNome,
+  schemaAtualizarDataNascimento,
+  schemaSolicitarAlteracaoEmail,
+  schemaConfirmarAlteracaoEmail,
   schemaSolicitarRecuperacaoSenha,
   schemaRedefinirSenha,
+  schemaSolicitarExclusaoConta,
+  schemaReativarConta,
 } from "../schemas/autenticacao.schema.js";
 
 const rotasAutenticacao = Router();
+
+rotasAutenticacao.post(
+  "/reativar-conta",
+  limiteReativacaoConta,
+  validarOrigemMutacao,
+  validarCorpo(schemaReativarConta),
+  controladorAutenticacao.reativarConta
+);
 
 rotasAutenticacao.post(
   "/cadastro",
@@ -63,6 +86,80 @@ rotasAutenticacao.get(
   "/eu",
   autenticar,
   controladorAutenticacao.obterUsuarioAtual
+);
+
+rotasAutenticacao.get(
+  "/eu/foto-perfil",
+  limiteVisualizacaoFotoPerfil,
+  autenticar,
+  controladorFotoPerfil.obterFotoPerfil
+);
+
+rotasAutenticacao.put(
+  "/eu/foto-perfil",
+  limiteUploadFotoPerfil,
+  validarOrigemMutacao,
+  autenticar,
+  receberFotoPerfil,
+  controladorFotoPerfil.atualizarFotoPerfil
+);
+
+rotasAutenticacao.delete(
+  "/eu",
+  limiteExclusaoConta,
+  validarOrigemMutacao,
+  autenticar,
+  validarCorpo(schemaSolicitarExclusaoConta),
+  controladorAutenticacao.solicitarExclusaoConta
+);
+
+rotasAutenticacao.delete(
+  "/eu/foto-perfil",
+  limiteRemocaoFotoPerfil,
+  validarOrigemMutacao,
+  autenticar,
+  controladorFotoPerfil.removerFotoPerfil
+);
+
+rotasAutenticacao.patch(
+  "/eu",
+  validarCorpo(schemaAtualizarNome),
+  autenticar,
+  controladorAutenticacao.atualizarNome
+);
+
+rotasAutenticacao.patch(
+  "/eu/data-nascimento",
+  autenticar,
+  validarCorpo(schemaAtualizarDataNascimento),
+  controladorAutenticacao.atualizarDataNascimento
+);
+
+rotasAutenticacao.post(
+  "/solicitar-alteracao-email",
+  limiteSolicitarAlteracaoEmail,
+  validarOrigemMutacao,
+  validarCorpo(schemaSolicitarAlteracaoEmail),
+  autenticar,
+  controladorAutenticacao.solicitarAlteracaoEmail
+);
+
+rotasAutenticacao.post(
+  "/confirmar-email-atual",
+  limiteConfirmarAlteracaoEmail,
+  validarOrigemMutacao,
+  validarCorpo(schemaConfirmarAlteracaoEmail),
+  autenticar,
+  controladorAutenticacao.confirmarEmailAtual
+);
+
+rotasAutenticacao.post(
+  "/confirmar-novo-email",
+  limiteConfirmarAlteracaoEmail,
+  validarOrigemMutacao,
+  validarCorpo(schemaConfirmarAlteracaoEmail),
+  autenticar,
+  controladorAutenticacao.confirmarNovoEmail
 );
 
 rotasAutenticacao.post(

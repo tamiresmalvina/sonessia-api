@@ -9,6 +9,22 @@ import { garantirBancoTestesIsolado } from "./helpers/isolamento-banco.helper.js
 describe("Fluxo de Cadastro — POST /autenticacao/cadastro", () => {
   const prefixoTeste = "test_cad_";
 
+  function obterDataNascimentoNoAniversario(idade: number): string {
+    const hoje = new Date();
+    const anoNascimento = hoje.getUTCFullYear() - idade;
+    const mesNascimento = hoje.getUTCMonth() + 1;
+    const ultimoDiaDoMes = new Date(
+      Date.UTC(anoNascimento, mesNascimento, 0)
+    ).getUTCDate();
+    const diaNascimento = Math.min(hoje.getUTCDate(), ultimoDiaDoMes);
+
+    return [
+      anoNascimento.toString().padStart(4, "0"),
+      mesNascimento.toString().padStart(2, "0"),
+      diaNascimento.toString().padStart(2, "0"),
+    ].join("-");
+  }
+
   beforeAll(async () => {
     await garantirBancoTestesIsolado();
   });
@@ -44,6 +60,7 @@ describe("Fluxo de Cadastro — POST /autenticacao/cadastro", () => {
       email,
       perfil: "COMUM",
       emailVerificado: false,
+      fotoPerfil: null,
     });
     // Garante que senhas ou hashes nunca são retornados
     expect(resposta.body.usuario).not.toHaveProperty("senha");
@@ -54,6 +71,89 @@ describe("Fluxo de Cadastro — POST /autenticacao/cadastro", () => {
     expect(usuarioBanco).not.toBeNull();
     expect(usuarioBanco?.perfil).toBe("COMUM");
     expect(usuarioBanco?.emailVerificado).toBe(false);
+    expect(usuarioBanco?.fotoPerfil).toBeNull();
+    expect(usuarioBanco?.fotoPerfilPublicId).toBeNull();
+  });
+
+  it.each([
+    ["URL pública", { fotoPerfil: "https://exemplo.com/foto.png" }, "fotoPerfil"],
+    [
+      "identificador interno",
+      { fotoPerfilPublicId: "perfis/conta-falsa" },
+      "fotoPerfilPublicId",
+    ],
+  ])(
+    "rejeita %s de foto enviado pelo cliente no cadastro",
+    async (_caso, camposFoto, campoEsperado) => {
+      const email = `${prefixoTeste}foto_cliente_${Date.now()}@teste.com`;
+
+      const resposta = await request(app)
+        .post("/autenticacao/cadastro")
+        .send({
+          nome: "Cadastro sem Foto",
+          email,
+          senha: "SenhaForteSegura@123",
+          dataNascimento: "1995-05-15",
+          ...camposFoto,
+        });
+
+      expect(resposta.status).toBe(400);
+      expect(resposta.body.erro.codigo).toBe("DADOS_INVALIDOS");
+      expect(resposta.body.erro.detalhes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            campo: campoEsperado,
+            mensagem: "A foto de perfil não pode ser definida durante o cadastro.",
+          }),
+        ])
+      );
+      expect(await prisma.usuario.findUnique({ where: { email } })).toBeNull();
+    }
+  );
+
+  it("rejeita cadastro de pessoa que ainda não completou 16 anos", async () => {
+    const email = `${prefixoTeste}menor_16_${Date.now()}@teste.com`;
+    const resposta = await request(app)
+      .post("/autenticacao/cadastro")
+      .send({
+        nome: "Pessoa Menor",
+        email,
+        senha: "SenhaForteSegura@123",
+        dataNascimento: obterDataNascimentoNoAniversario(15),
+      });
+
+    expect(resposta.status).toBe(400);
+    expect(resposta.body.erro.codigo).toBe("DADOS_INVALIDOS");
+    expect(await prisma.usuario.findUnique({ where: { email } })).toBeNull();
+  });
+
+  it("aceita no cadastro quem completa 16 anos hoje e persiste a data civil sem deslocamento", async () => {
+    const email = `${prefixoTeste}faz_16_hoje_${Date.now()}@teste.com`;
+    const dataNascimento = obterDataNascimentoNoAniversario(16);
+    definirInterceptadorEmailTeste(async () => ({
+      sucesso: true,
+      status: "ENVIADO",
+      mensagemId: "cadastro-data-nascimento-teste",
+    }));
+
+    const resposta = await request(app)
+      .post("/autenticacao/cadastro")
+      .send({
+        nome: "Pessoa com 16 anos",
+        email,
+        senha: "SenhaForteSegura@123",
+        dataNascimento,
+      });
+
+    expect(resposta.status).toBe(201);
+    expect(resposta.body.usuario.dataNascimento).toBe(
+      `${dataNascimento}T00:00:00.000Z`
+    );
+
+    const usuarioBanco = await prisma.usuario.findUnique({ where: { email } });
+    expect(usuarioBanco?.dataNascimento.toISOString()).toBe(
+      `${dataNascimento}T00:00:00.000Z`
+    );
   });
 
   it("senha é armazenada exclusivamente como hash Argon2id", async () => {
@@ -423,4 +523,3 @@ describe("Fluxo de Cadastro — POST /autenticacao/cadastro", () => {
     expect(codigosAtivos.length).toBe(1);
   });
 });
-

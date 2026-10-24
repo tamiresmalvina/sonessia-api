@@ -56,6 +56,7 @@ describe("Middleware de Autenticação e Consulta de Usuário — GET /autentica
         nome: usuario.nome,
         email: usuario.email,
         perfil: "COMUM",
+        fotoPerfil: null,
       },
     });
 
@@ -64,6 +65,31 @@ describe("Middleware de Autenticação e Consulta de Usuário — GET /autentica
     expect(resposta.body.usuario).not.toHaveProperty("tokenHash");
     expect(resposta.body.usuario).not.toHaveProperty("codigoHash");
     expect(resposta.body).not.toHaveProperty("refreshToken");
+  });
+
+  it("expõe somente o caminho autenticado da foto, nunca o public_id interno", async () => {
+    const usuario = await criarUsuarioTeste();
+    await prisma.usuario.update({
+      where: { id: usuario.id },
+      data: { fotoPerfilPublicId: "sonessia/perfis/referencia-interna" },
+    });
+    const token = emitirTokenAcesso({
+      sub: usuario.id,
+      versaoToken: usuario.versaoToken,
+    });
+
+    const resposta = await request(app)
+      .get("/autenticacao/eu")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(resposta.status).toBe(200);
+    expect(resposta.body.usuario.fotoPerfil).toBe(
+      "/autenticacao/eu/foto-perfil"
+    );
+    expect(JSON.stringify(resposta.body)).not.toContain(
+      "referencia-interna"
+    );
+    expect(resposta.body.usuario).not.toHaveProperty("fotoPerfilPublicId");
   });
 
   it("busca o perfil atualizado do banco de dados e não confia em claims de perfil no token", async () => {

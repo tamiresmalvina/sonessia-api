@@ -36,16 +36,21 @@ enum CategoriaAudio {
 }
 
 model Usuario {
-  id              String   @id @default(uuid()) @db.Uuid
-  nome            String
-  email           String   @unique
-  senha           String
-  dataNascimento  DateTime
-  fotoPerfil      String?
-  perfil          Perfil   @default(COMUM)
-  emailVerificado Boolean   @default(false)
-  senhaAlteradaEm DateTime?
-  versaoToken     Int       @default(1)
+  id                 String    @id @default(uuid()) @db.Uuid
+  nome               String
+  email              String    @unique
+  senha              String
+  dataNascimento     DateTime
+  fotoPerfil         String?
+  fotoPerfilPublicId String?
+  perfil             Perfil    @default(COMUM)
+  emailVerificado    Boolean   @default(false)
+  senhaAlteradaEm    DateTime?
+  versaoToken        Int       @default(1)
+  exclusaoSolicitadaEm         DateTime?
+  exclusaoDefinitivaEm         DateTime?
+  exclusaoProcessamentoAte     DateTime?
+  exclusaoProcessamentoToken   String?   @db.Uuid
 
   colecoes               Colecao[]
   ambientesSonoros       AmbienteSonoro[]
@@ -53,6 +58,29 @@ model Usuario {
   codigosVerificacao     CodigoVerificacaoEmail[]
   sessoes                Sessao[]
   tokensRecuperacaoSenha TokenRecuperacaoSenha[]
+  alteracoesEmail        AlteracaoEmail[]
+
+  @@index([exclusaoDefinitivaEm])
+}
+
+model AlteracaoEmail {
+  id                     String    @id @default(uuid()) @db.Uuid
+  idUsuario              String    @db.Uuid
+  emailAtual             String
+  emailNovo              String
+  tokenEmailAtualHash    String?   @unique
+  tokenEmailNovoHash     String?   @unique
+  expiraEm               DateTime
+  emailAtualConfirmadoEm DateTime?
+  concluidaEm            DateTime?
+  invalidadaEm           DateTime?
+  criadoEm               DateTime  @default(now())
+
+  usuario Usuario @relation(fields: [idUsuario], references: [id], onDelete: Cascade)
+
+  @@index([idUsuario])
+  @@index([emailNovo])
+  @@index([expiraEm])
 }
 
 model TokenRecuperacaoSenha {

@@ -8,6 +8,8 @@ export interface UsuarioAutenticado {
   emailVerificado: boolean;
   versaoToken: number;
   senhaAlteradaEm: Date | null;
+  fotoPerfilPublicId: string | null;
+  exclusaoDefinitivaEm: Date | null;
 }
 
 declare global {

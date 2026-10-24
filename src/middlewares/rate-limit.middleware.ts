@@ -42,6 +42,50 @@ export const limiteReenvio = rateLimit({
   },
 });
 
+export const limiteSolicitarAlteracaoEmail = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => ambiente.NODE_ENV === "test",
+  handler: (_req, res) => {
+    res.status(429).json(respostaPadraoRateLimit);
+  },
+});
+
+export const limiteConfirmarAlteracaoEmail = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => ambiente.NODE_ENV === "test",
+  handler: (_req, res) => {
+    res.status(429).json(respostaPadraoRateLimit);
+  },
+});
+
+export const limiteExclusaoConta = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => ambiente.NODE_ENV === "test",
+  handler: (_req, res) => {
+    res.status(429).json(respostaPadraoRateLimit);
+  },
+});
+
+export const limiteReativacaoConta = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => ambiente.NODE_ENV === "test",
+  handler: (_req, res) => {
+    res.status(429).json(respostaPadraoRateLimit);
+  },
+});
+
 export const limiteLogin = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 10,
@@ -86,3 +130,35 @@ export const limiteRedefinicaoSenha = rateLimit({
   },
 });
 
+export const limiteUploadFotoPerfil = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => ambiente.NODE_ENV === "test",
+  handler: (_req, res) => {
+    res.status(429).json(respostaPadraoRateLimit);
+  },
+});
+
+export const limiteVisualizacaoFotoPerfil = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => ambiente.NODE_ENV === "test",
+  handler: (_req, res) => {
+    res.status(429).json(respostaPadraoRateLimit);
+  },
+});
+
+export const limiteRemocaoFotoPerfil = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => ambiente.NODE_ENV === "test",
+  handler: (_req, res) => {
+    res.status(429).json(respostaPadraoRateLimit);
+  },
+});

@@ -25,13 +25,21 @@ import {
 import {
   enviarEmailVerificacao,
   enviarEmailRecuperacaoSenha,
+  enviarEmailConfirmacaoAlteracaoEmail,
+  type ResultadoEnvioEmail,
 } from "../utils/email.util.js";
 import type {
   EntradaCadastro,
   EntradaVerificarEmail,
   EntradaReenviarCodigo,
   EntradaLogin,
+  EntradaAtualizarNome,
+  EntradaAtualizarDataNascimento,
+  EntradaSolicitarAlteracaoEmail,
+  EntradaConfirmarAlteracaoEmail,
+  EntradaReativarConta,
 } from "../schemas/autenticacao.schema.js";
+import type { UsuarioAutenticado } from "../types/express.js";
 
 export interface RespostaCadastro {
   mensagem: string;
@@ -42,7 +50,7 @@ export interface RespostaCadastro {
     perfil: string;
     emailVerificado: boolean;
     dataNascimento: Date;
-    fotoPerfil: string | null;
+    fotoPerfil: null;
   };
 }
 
@@ -80,7 +88,7 @@ export async function cadastrarUsuario(dados: EntradaCadastro): Promise<Resposta
           email: emailNormalizado,
           senha: senhaHash,
           dataNascimento: dados.dataNascimento,
-          fotoPerfil: dados.fotoPerfil ?? null,
+          fotoPerfil: null,
           perfil: Perfil.COMUM, // Fixado explicitamente pelo servidor!
           emailVerificado: false,
         },
@@ -91,7 +99,6 @@ export async function cadastrarUsuario(dados: EntradaCadastro): Promise<Resposta
           perfil: true,
           emailVerificado: true,
           dataNascimento: true,
-          fotoPerfil: true,
         },
       });
 
@@ -160,7 +167,10 @@ export async function cadastrarUsuario(dados: EntradaCadastro): Promise<Resposta
 
   return {
     mensagem: "Cadastro realizado com sucesso. Um código de verificação foi encaminhado para o seu e-mail.",
-    usuario: novoUsuario,
+    usuario: {
+      ...novoUsuario,
+      fotoPerfil: null,
+    },
   };
 }
 
@@ -427,6 +437,473 @@ export interface RespostaAutenticar {
   idSessao: string;
 }
 
+export interface UsuarioPublico {
+  id: string;
+  nome: string;
+  email: string;
+  perfil: Perfil;
+}
+
+export interface UsuarioPublicoComDataNascimento extends UsuarioPublico {
+  dataNascimento: Date;
+}
+
+export async function atualizarNomeUsuario(
+  usuarioAutenticado: UsuarioAutenticado,
+  dados: EntradaAtualizarNome
+): Promise<UsuarioPublico> {
+  if (dados.nome === usuarioAutenticado.nome) {
+    return {
+      id: usuarioAutenticado.id,
+      nome: usuarioAutenticado.nome,
+      email: usuarioAutenticado.email,
+      perfil: usuarioAutenticado.perfil,
+    };
+  }
+
+  return prisma.usuario.update({
+    where: { id: usuarioAutenticado.id },
+    data: { nome: dados.nome },
+    select: {
+      id: true,
+      nome: true,
+      email: true,
+      perfil: true,
+    },
+  });
+}
+
+export async function atualizarDataNascimentoUsuario(
+  idUsuario: string,
+  dados: EntradaAtualizarDataNascimento
+): Promise<UsuarioPublicoComDataNascimento> {
+  return prisma.usuario.update({
+    where: { id: idUsuario },
+    data: { dataNascimento: dados.dataNascimento },
+    select: {
+      id: true,
+      nome: true,
+      email: true,
+      perfil: true,
+      dataNascimento: true,
+    },
+  });
+}
+
+const MENSAGEM_NEUTRA_ALTERACAO_EMAIL =
+  "Se a solicitação puder ser processada, as instruções serão enviadas ao e-mail atual.";
+const DURACAO_ALTERACAO_EMAIL_MS = DURACAO_TOKEN_RECUPERACAO_MS;
+
+interface ParametrosSolicitarAlteracaoEmail {
+  idUsuario: string;
+  dados: EntradaSolicitarAlteracaoEmail;
+}
+
+interface ParametrosConfirmarAlteracaoEmail extends EntradaConfirmarAlteracaoEmail {
+  idUsuario: string;
+}
+
+function erroPrismaUnicidade(erro: unknown): boolean {
+  return (
+    typeof erro === "object" &&
+    erro !== null &&
+    "code" in erro &&
+    erro.code === "P2002"
+  );
+}
+
+async function invalidarAlteracaoEmail(idAlteracao: string): Promise<void> {
+  await prisma.alteracaoEmail.updateMany({
+    where: {
+      id: idAlteracao,
+      concluidaEm: null,
+      invalidadaEm: null,
+    },
+    data: {
+      tokenEmailAtualHash: null,
+      tokenEmailNovoHash: null,
+      invalidadaEm: new Date(),
+    },
+  });
+}
+
+async function tratarFalhaEnvioAlteracaoEmail(
+  idAlteracao: string,
+  resultado: ResultadoEnvioEmail
+): Promise<void> {
+  if (resultado.sucesso) {
+    return;
+  }
+
+  if (resultado.status === "FALHA_ENVIO") {
+    await invalidarAlteracaoEmail(idAlteracao);
+  }
+
+  throw new AppError(
+    502,
+    "FALHA_ENVIO_EMAIL",
+    "Não foi possível confirmar o envio do e-mail de confirmação. Verifique sua caixa de entrada antes de solicitar novamente."
+  );
+}
+
+export async function solicitarAlteracaoEmail(
+  parametros: ParametrosSolicitarAlteracaoEmail
+): Promise<{ mensagem: string }> {
+  const resultado = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT id FROM "Usuario" WHERE id = ${parametros.idUsuario}::uuid FOR UPDATE
+    `;
+
+    const usuario = await tx.usuario.findUnique({
+      where: { id: parametros.idUsuario },
+      select: { id: true, nome: true, email: true },
+    });
+
+    if (!usuario) {
+      throw new AppError(401, "USUARIO_NAO_ENCONTRADO", "Usuário autenticado não encontrado.");
+    }
+
+    if (parametros.dados.novoEmail === usuario.email.toLowerCase()) {
+      throw new AppError(
+        400,
+        "NOVO_EMAIL_IGUAL_ATUAL",
+        "O novo e-mail deve ser diferente do endereço atual."
+      );
+    }
+
+    const solicitacaoMaisRecente = await tx.alteracaoEmail.findFirst({
+      where: { idUsuario: usuario.id },
+      orderBy: { criadoEm: "desc" },
+      select: { criadoEm: true },
+    });
+
+    if (
+      solicitacaoMaisRecente &&
+      Date.now() - solicitacaoMaisRecente.criadoEm.getTime() < INTERVALO_REENVIO_MS
+    ) {
+      return { aguardando: true as const };
+    }
+
+    await tx.alteracaoEmail.updateMany({
+      where: {
+        idUsuario: usuario.id,
+        concluidaEm: null,
+        invalidadaEm: null,
+      },
+      data: {
+        tokenEmailAtualHash: null,
+        tokenEmailNovoHash: null,
+        invalidadaEm: new Date(),
+      },
+    });
+
+    const token = gerarTokenRecuperacao();
+    const alteracao = await tx.alteracaoEmail.create({
+      data: {
+        idUsuario: usuario.id,
+        emailAtual: usuario.email,
+        emailNovo: parametros.dados.novoEmail,
+        tokenEmailAtualHash: gerarHashToken(token),
+        expiraEm: new Date(Date.now() + DURACAO_ALTERACAO_EMAIL_MS),
+      },
+      select: { id: true },
+    });
+
+    return {
+      aguardando: false as const,
+      idAlteracao: alteracao.id,
+      token,
+      destinatario: usuario.email,
+      nome: usuario.nome,
+    };
+  });
+
+  if (resultado.aguardando) {
+    return { mensagem: MENSAGEM_NEUTRA_ALTERACAO_EMAIL };
+  }
+
+  const envio = await enviarEmailConfirmacaoAlteracaoEmail({
+    destinatario: resultado.destinatario,
+    nome: resultado.nome,
+    token: resultado.token,
+    etapa: "atual",
+  });
+  await tratarFalhaEnvioAlteracaoEmail(resultado.idAlteracao, envio);
+
+  return { mensagem: MENSAGEM_NEUTRA_ALTERACAO_EMAIL };
+}
+
+export async function confirmarEmailAtual(
+  parametros: ParametrosConfirmarAlteracaoEmail
+): Promise<{ mensagem: string }> {
+  const tokenHash = gerarHashToken(parametros.token);
+  const registroEncontrado = await prisma.alteracaoEmail.findUnique({
+    where: { tokenEmailAtualHash: tokenHash },
+    select: { id: true, idUsuario: true },
+  });
+
+  if (!registroEncontrado || registroEncontrado.idUsuario !== parametros.idUsuario) {
+    throw new AppError(400, "TOKEN_INVALIDO", "Token de confirmação inválido ou expirado.");
+  }
+
+  const resultado = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT id FROM "Usuario" WHERE id = ${parametros.idUsuario}::uuid FOR UPDATE
+    `;
+    await tx.$queryRaw`
+      SELECT id FROM "AlteracaoEmail" WHERE id = ${registroEncontrado.id}::uuid FOR UPDATE
+    `;
+
+    const alteracao = await tx.alteracaoEmail.findUnique({
+      where: { id: registroEncontrado.id },
+    });
+    const usuario = await tx.usuario.findUnique({
+      where: { id: parametros.idUsuario },
+      select: { email: true, nome: true },
+    });
+
+    if (
+      !alteracao ||
+      !usuario ||
+      alteracao.idUsuario !== parametros.idUsuario ||
+      alteracao.tokenEmailAtualHash !== tokenHash ||
+      alteracao.concluidaEm ||
+      alteracao.invalidadaEm
+    ) {
+      throw new AppError(400, "TOKEN_INVALIDO", "Token de confirmação inválido ou expirado.");
+    }
+
+    if (alteracao.expiraEm <= new Date()) {
+      await tx.alteracaoEmail.update({
+        where: { id: alteracao.id },
+        data: {
+          tokenEmailAtualHash: null,
+          tokenEmailNovoHash: null,
+          invalidadaEm: new Date(),
+        },
+      });
+      return { situacao: "EXPIRADO" as const };
+    }
+
+    if (usuario.email !== alteracao.emailAtual) {
+      throw new AppError(400, "TOKEN_INVALIDO", "Token de confirmação inválido ou expirado.");
+    }
+
+    const emailExistente = await tx.usuario.findUnique({
+      where: { email: alteracao.emailNovo },
+      select: { id: true },
+    });
+    if (emailExistente && emailExistente.id !== parametros.idUsuario) {
+      await tx.alteracaoEmail.update({
+        where: { id: alteracao.id },
+        data: {
+          tokenEmailAtualHash: null,
+          tokenEmailNovoHash: null,
+          invalidadaEm: new Date(),
+        },
+      });
+      return { situacao: "EMAIL_INDISPONIVEL" as const };
+    }
+
+    const tokenNovo = gerarTokenRecuperacao();
+    await tx.alteracaoEmail.update({
+      where: { id: alteracao.id },
+      data: {
+        tokenEmailAtualHash: null,
+        tokenEmailNovoHash: gerarHashToken(tokenNovo),
+        emailAtualConfirmadoEm: new Date(),
+      },
+    });
+
+    return {
+      situacao: "AGUARDANDO_CONFIRMACAO_NOVO" as const,
+      idAlteracao: alteracao.id,
+      token: tokenNovo,
+      destinatario: alteracao.emailNovo,
+      nome: usuario.nome,
+    };
+  });
+
+  if (resultado.situacao === "EMAIL_INDISPONIVEL") {
+    throw new AppError(
+      409,
+      "ALTERACAO_EMAIL_NAO_CONCLUIDA",
+      "Não foi possível concluir a alteração solicitada."
+    );
+  }
+
+  if (resultado.situacao === "EXPIRADO") {
+    throw new AppError(400, "TOKEN_EXPIRADO", "Token de confirmação expirado.");
+  }
+
+  const envio = await enviarEmailConfirmacaoAlteracaoEmail({
+    destinatario: resultado.destinatario,
+    nome: resultado.nome,
+    token: resultado.token,
+    etapa: "novo",
+  });
+  await tratarFalhaEnvioAlteracaoEmail(resultado.idAlteracao, envio);
+
+  return { mensagem: "Confirmação do novo e-mail enviada." };
+}
+
+export async function confirmarNovoEmail(
+  parametros: ParametrosConfirmarAlteracaoEmail
+): Promise<{ mensagem: string }> {
+  const tokenHash = gerarHashToken(parametros.token);
+  const registroEncontrado = await prisma.alteracaoEmail.findUnique({
+    where: { tokenEmailNovoHash: tokenHash },
+    select: { id: true, idUsuario: true },
+  });
+
+  if (!registroEncontrado || registroEncontrado.idUsuario !== parametros.idUsuario) {
+    throw new AppError(400, "TOKEN_INVALIDO", "Token de confirmação inválido ou expirado.");
+  }
+
+  try {
+    const resultado = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`
+        SELECT id FROM "Usuario" WHERE id = ${parametros.idUsuario}::uuid FOR UPDATE
+      `;
+      await tx.$queryRaw`
+        SELECT id FROM "AlteracaoEmail" WHERE id = ${registroEncontrado.id}::uuid FOR UPDATE
+      `;
+
+      const alteracao = await tx.alteracaoEmail.findUnique({
+        where: { id: registroEncontrado.id },
+      });
+      const usuario = await tx.usuario.findUnique({
+        where: { id: parametros.idUsuario },
+        select: { email: true },
+      });
+
+      if (
+        !alteracao ||
+        !usuario ||
+        alteracao.idUsuario !== parametros.idUsuario ||
+        alteracao.tokenEmailNovoHash !== tokenHash ||
+        !alteracao.emailAtualConfirmadoEm ||
+        alteracao.concluidaEm ||
+        alteracao.invalidadaEm
+      ) {
+        throw new AppError(400, "TOKEN_INVALIDO", "Token de confirmação inválido ou expirado.");
+      }
+
+      if (alteracao.expiraEm <= new Date()) {
+        await tx.alteracaoEmail.update({
+          where: { id: alteracao.id },
+          data: {
+            tokenEmailAtualHash: null,
+            tokenEmailNovoHash: null,
+            invalidadaEm: new Date(),
+          },
+        });
+        return { situacao: "EXPIRADO" as const };
+      }
+
+      if (usuario.email !== alteracao.emailAtual) {
+        throw new AppError(400, "TOKEN_INVALIDO", "Token de confirmação inválido ou expirado.");
+      }
+
+      const emailExistente = await tx.usuario.findUnique({
+        where: { email: alteracao.emailNovo },
+        select: { id: true },
+      });
+      if (emailExistente && emailExistente.id !== parametros.idUsuario) {
+        await tx.alteracaoEmail.update({
+          where: { id: alteracao.id },
+          data: {
+            tokenEmailAtualHash: null,
+            tokenEmailNovoHash: null,
+            invalidadaEm: new Date(),
+          },
+        });
+        return {
+          situacao: "EMAIL_INDISPONIVEL" as const,
+        };
+      }
+
+      await tx.usuario.update({
+        where: { id: parametros.idUsuario },
+        data: {
+          email: alteracao.emailNovo,
+          emailVerificado: true,
+          versaoToken: { increment: 1 },
+        },
+      });
+
+      await tx.alteracaoEmail.update({
+        where: { id: alteracao.id },
+        data: {
+          tokenEmailAtualHash: null,
+          tokenEmailNovoHash: null,
+          concluidaEm: new Date(),
+        },
+      });
+
+      await tx.alteracaoEmail.updateMany({
+        where: {
+          idUsuario: parametros.idUsuario,
+          id: { not: alteracao.id },
+          concluidaEm: null,
+          invalidadaEm: null,
+        },
+        data: {
+          tokenEmailAtualHash: null,
+          tokenEmailNovoHash: null,
+          invalidadaEm: new Date(),
+        },
+      });
+
+      await tx.codigoVerificacaoEmail.updateMany({
+        where: { idUsuario: parametros.idUsuario, usado: false },
+        data: { usado: true },
+      });
+      await tx.tokenRecuperacaoSenha.updateMany({
+        where: { idUsuario: parametros.idUsuario, usado: false },
+        data: { usado: true },
+      });
+      await tx.sessao.updateMany({
+        where: {
+          idUsuario: parametros.idUsuario,
+          status: StatusSessao.ATIVA,
+        },
+        data: { status: StatusSessao.REVOGADA },
+      });
+
+      return {
+        situacao: "CONCLUIDO" as const,
+      };
+    });
+
+    if (resultado.situacao === "EMAIL_INDISPONIVEL") {
+      throw new AppError(
+        409,
+        "ALTERACAO_EMAIL_NAO_CONCLUIDA",
+        "Não foi possível concluir a alteração solicitada."
+      );
+    }
+
+    if (resultado.situacao === "EXPIRADO") {
+      throw new AppError(400, "TOKEN_EXPIRADO", "Token de confirmação expirado.");
+    }
+  } catch (erro) {
+    if (erroPrismaUnicidade(erro)) {
+      await invalidarAlteracaoEmail(registroEncontrado.id);
+      throw new AppError(
+        409,
+        "ALTERACAO_EMAIL_NAO_CONCLUIDA",
+        "Não foi possível concluir a alteração solicitada."
+      );
+    }
+    throw erro;
+  }
+
+  return {
+    mensagem: "E-mail atualizado com sucesso. Entre novamente para continuar.",
+  };
+}
+
 export async function autenticarUsuario(dados: EntradaLogin): Promise<RespostaAutenticar> {
   const emailNormalizado = dados.email.toLowerCase().trim();
 
@@ -444,6 +921,14 @@ export async function autenticarUsuario(dados: EntradaLogin): Promise<RespostaAu
   const senhaCorreta = await verificarSenha(usuario.senha, dados.senha);
   if (!senhaCorreta) {
     throw new AppError(401, "CREDENCIAIS_INVALIDAS", "E-mail ou senha incorretos.");
+  }
+
+  if (usuario.exclusaoDefinitivaEm) {
+    throw new AppError(
+      403,
+      "CONTA_EXCLUSAO_PENDENTE",
+      "A conta está pendente de exclusão. Reative-a antes de entrar."
+    );
   }
 
   // Bloqueio obrigatório para contas com e-mail não verificado
@@ -575,6 +1060,10 @@ export async function renovarSessao(refreshTokenPlano: string): Promise<Resposta
       return { tipo: "EMAIL_NAO_VERIFICADO" as const };
     }
 
+    if (sessaoAtual.usuario.exclusaoDefinitivaEm) {
+      return { tipo: "CONTA_EXCLUSAO_PENDENTE" as const };
+    }
+
     // 7. Rotação do refresh token: gera novo token aleatório, hash SHA-256 e nova expiração
     const novoRefreshToken = gerarRefreshToken();
     const novoTokenHash = gerarHashToken(novoRefreshToken);
@@ -637,6 +1126,12 @@ export async function renovarSessao(refreshTokenPlano: string): Promise<Resposta
         403,
         "EMAIL_NAO_VERIFICADO",
         "É necessário confirmar seu e-mail antes de renovar a sessão."
+      );
+    case "CONTA_EXCLUSAO_PENDENTE":
+      throw new AppError(
+        401,
+        "SESSAO_INVALIDA",
+        "Sessão inválida. Reative a conta para entrar novamente."
       );
     case "SUCESSO":
       return {
@@ -712,7 +1207,11 @@ export async function solicitarRecuperacaoSenha(
 
   // Anti-timing e mitigação de enumeração:
   // Se o usuário não existir ou não estiver verificado, executa operação para balancear o tempo
-  if (!usuario || !usuario.emailVerificado) {
+  if (
+    !usuario ||
+    !usuario.emailVerificado ||
+    usuario.exclusaoDefinitivaEm
+  ) {
     await verificarSenha(HASH_FICTICIO_ARGON2ID, "SenhaTemporariaFicticia@123");
     return {
       mensagem:
@@ -725,6 +1224,14 @@ export async function solicitarRecuperacaoSenha(
     // Lock pessimista na linha do Usuario (ordem invariável 1)
     await tx.$queryRaw`SELECT id FROM "Usuario" WHERE id = ${usuario.id}::uuid FOR UPDATE`;
 
+    const usuarioAtual = await tx.usuario.findUnique({
+      where: { id: usuario.id },
+      select: { emailVerificado: true, exclusaoDefinitivaEm: true },
+    });
+    if (!usuarioAtual?.emailVerificado || usuarioAtual.exclusaoDefinitivaEm) {
+      return { bloqueada: true, cooldown: false, tokenPlano: null, idToken: null };
+    }
+
     // Consulta o último token gerado para verificar cooldown de 60s
     const ultimoToken = await tx.tokenRecuperacaoSenha.findFirst({
       where: { idUsuario: usuario.id },
@@ -736,7 +1243,12 @@ export async function solicitarRecuperacaoSenha(
       Date.now() - ultimoToken.criadoEm.getTime() < 60_000
     ) {
       // Cooldown ativo: comita sem criar nada e sem disparar e-mail
-      return { cooldown: true, tokenPlano: null, idToken: null };
+      return {
+        bloqueada: false,
+        cooldown: true,
+        tokenPlano: null,
+        idToken: null,
+      };
     }
 
     // Invalida tokens anteriores não usados
@@ -765,6 +1277,7 @@ export async function solicitarRecuperacaoSenha(
     });
 
     return {
+      bloqueada: false,
       cooldown: false,
       tokenPlano,
       idToken: novoToken.id,
@@ -772,7 +1285,12 @@ export async function solicitarRecuperacaoSenha(
   });
 
   // Se o cooldown estava ativo, retorna a mensagem neutra sem disparar e-mail
-  if (resultadoTransacao.cooldown || !resultadoTransacao.tokenPlano || !resultadoTransacao.idToken) {
+  if (
+    resultadoTransacao.bloqueada ||
+    resultadoTransacao.cooldown ||
+    !resultadoTransacao.tokenPlano ||
+    !resultadoTransacao.idToken
+  ) {
     return {
       mensagem:
         "Se o e-mail informado estiver cadastrado e verificado, as instruções para redefinição de senha foram enviadas.",
@@ -836,6 +1354,17 @@ export async function redefinirSenha(
 
     // 2. Ordem de bloqueio rigorosa: Usuario PRIMEIRO, depois TokenRecuperacaoSenha
     await tx.$queryRaw`SELECT id FROM "Usuario" WHERE id = ${tokenRegistro.idUsuario}::uuid FOR UPDATE`;
+    const usuarioAtual = await tx.usuario.findUnique({
+      where: { id: tokenRegistro.idUsuario },
+      select: { exclusaoDefinitivaEm: true },
+    });
+    if (!usuarioAtual || usuarioAtual.exclusaoDefinitivaEm) {
+      throw new AppError(
+        400,
+        "TOKEN_INVALIDO",
+        "Token de recuperação inválido ou expirado."
+      );
+    }
     await tx.$queryRaw`SELECT id FROM "TokenRecuperacaoSenha" WHERE id = ${tokenRegistro.id}::uuid FOR UPDATE`;
 
     // 3. Revalida o token sob bloqueio
@@ -883,5 +1412,3 @@ export async function redefinirSenha(
     mensagem: "Senha redefinida com sucesso. Faça login com a nova senha.",
   };
 }
-
-

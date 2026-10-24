@@ -1,12 +1,14 @@
 import { ambiente } from "./config/ambiente.js";
 import { app } from "./app.js";
 import { prisma } from "../lib/prisma.js";
+import { iniciarRotinaPurgaContas } from "./services/exclusao-conta.service.js";
 
 async function iniciarServidor(): Promise<void> {
   try {
     const porta = ambiente.PORT;
 
     const servidor = app.listen(porta, () => {
+      iniciarRotinaPurgaContas();
       console.log(
         `Servidor rodando na porta ${porta} [ambiente: ${ambiente.NODE_ENV}]`,
       );

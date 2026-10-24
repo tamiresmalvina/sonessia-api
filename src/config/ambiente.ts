@@ -11,7 +11,9 @@ const schemaAmbiente = z.object({
   JWT_AUDIENCE: z.string().min(1, "JWT_AUDIENCE é obrigatório"),
   ACCESS_TOKEN_TTL: z.string().default("15m"),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
-  EMAIL_PROVIDER: z.string().default("ethereal"),
+  EMAIL_PROVIDER: z.enum(["ethereal", "mailpit"]).default("ethereal"),
+  MAILPIT_HOST: z.string().default("localhost"),
+  MAILPIT_PORT: z.coerce.number().int().positive().default(1025),
 });
 
 export type Ambiente = z.infer<typeof schemaAmbiente>;

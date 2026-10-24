@@ -3,12 +3,14 @@ import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
 import {
   enviarEmailVerificacao,
+  enviarEmailRecuperacaoSenha,
   definirInterceptadorEmailTeste,
   definirForcarExecucaoEtherealEmTestes,
   definirTransportadorCustomizado,
   resetarTransportadorEthereal,
+  obterTransportador,
 } from "../src/utils/email.util.js";
-import { ambiente } from "../src/config/ambiente.js";
+import { ambiente, validarAmbiente } from "../src/config/ambiente.js";
 
 describe("Envio de E-mail — Provedor Ethereal e Validações de Transporte", () => {
   beforeEach(() => {
@@ -283,3 +285,319 @@ describe("Envio de E-mail — Provedor Ethereal e Validações de Transporte", (
     expect(htmlEnviado).toContain("&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt; &amp; João &quot;Silva&quot;");
   });
 });
+
+describe("Envio de E-mail — Provedor Mailpit e Regras de Seleção/Bloqueio", () => {
+  beforeEach(() => {
+    definirInterceptadorEmailTeste(null);
+    definirTransportadorCustomizado(null);
+    resetarTransportadorEthereal();
+    definirForcarExecucaoEtherealEmTestes(true);
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    definirInterceptadorEmailTeste(null);
+    definirTransportadorCustomizado(null);
+    resetarTransportadorEthereal();
+    definirForcarExecucaoEtherealEmTestes(false);
+    vi.restoreAllMocks();
+  });
+
+  it("mantém ethereal como provedor padrão quando EMAIL_PROVIDER não for definido", () => {
+    const baseValida = {
+      NODE_ENV: "development",
+      PORT: "3000",
+      DATABASE_URL: "postgresql://localhost:5432/sonessia",
+      JWT_ACCESS_SECRET: "chave-secreta-forte-para-testes-123456",
+      JWT_ISSUER: "sonessia-api",
+      JWT_AUDIENCE: "sonessia-web",
+      ACCESS_TOKEN_TTL: "15m",
+      REFRESH_TOKEN_TTL_DAYS: "7",
+    };
+
+    const config = validarAmbiente(baseValida);
+    expect(config.EMAIL_PROVIDER).toBe("ethereal");
+    expect(config.MAILPIT_HOST).toBe("localhost");
+    expect(config.MAILPIT_PORT).toBe(1025);
+  });
+
+  it("valida que o schema aceita somente 'ethereal' ou 'mailpit' como provedores de e-mail", () => {
+    const baseValida = {
+      NODE_ENV: "development",
+      PORT: "3000",
+      DATABASE_URL: "postgresql://localhost:5432/sonessia",
+      JWT_ACCESS_SECRET: "chave-secreta-forte-para-testes-123456",
+      JWT_ISSUER: "sonessia-api",
+      JWT_AUDIENCE: "sonessia-web",
+      ACCESS_TOKEN_TTL: "15m",
+      REFRESH_TOKEN_TTL_DAYS: "7",
+    };
+
+    const configEthereal = validarAmbiente({ ...baseValida, EMAIL_PROVIDER: "ethereal" });
+    expect(configEthereal.EMAIL_PROVIDER).toBe("ethereal");
+
+    const configMailpit = validarAmbiente({ ...baseValida, EMAIL_PROVIDER: "mailpit" });
+    expect(configMailpit.EMAIL_PROVIDER).toBe("mailpit");
+
+    expect(() => validarAmbiente({ ...baseValida, EMAIL_PROVIDER: "sendgrid" })).toThrowError(/EMAIL_PROVIDER/);
+  });
+
+  it("inicializa o transporte Mailpit com host localhost, porta 1025 e sem TLS por padrão", async () => {
+    const spyCreateTransport = vi.spyOn(nodemailer, "createTransport");
+    const spyCreateAccount = vi.spyOn(nodemailer, "createTestAccount");
+
+    const ambienteOriginalProvider = ambiente.EMAIL_PROVIDER;
+    const ambienteOriginalHost = ambiente.MAILPIT_HOST;
+    const ambienteOriginalPort = ambiente.MAILPIT_PORT;
+
+    try {
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = "mailpit";
+      (ambiente as Record<string, unknown>).MAILPIT_HOST = "localhost";
+      (ambiente as Record<string, unknown>).MAILPIT_PORT = 1025;
+
+      const transportador = await obterTransportador();
+
+      expect(spyCreateTransport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host: "localhost",
+          port: 1025,
+          secure: false,
+          ignoreTLS: true,
+        })
+      );
+      expect(spyCreateAccount).not.toHaveBeenCalled();
+      expect(transportador).toBeDefined();
+    } finally {
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = ambienteOriginalProvider;
+      (ambiente as Record<string, unknown>).MAILPIT_HOST = ambienteOriginalHost;
+      (ambiente as Record<string, unknown>).MAILPIT_PORT = ambienteOriginalPort;
+    }
+  });
+
+  it("respeita configurações customizadas de MAILPIT_HOST e MAILPIT_PORT", async () => {
+    const spyCreateTransport = vi.spyOn(nodemailer, "createTransport");
+    const ambienteOriginalProvider = ambiente.EMAIL_PROVIDER;
+    const ambienteOriginalHost = ambiente.MAILPIT_HOST;
+    const ambienteOriginalPort = ambiente.MAILPIT_PORT;
+
+    try {
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = "mailpit";
+      (ambiente as Record<string, unknown>).MAILPIT_HOST = "mailpit.custom.internal";
+      (ambiente as Record<string, unknown>).MAILPIT_PORT = 2025;
+
+      await obterTransportador();
+
+      expect(spyCreateTransport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host: "mailpit.custom.internal",
+          port: 2025,
+          secure: false,
+          ignoreTLS: true,
+        })
+      );
+    } finally {
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = ambienteOriginalProvider;
+      (ambiente as Record<string, unknown>).MAILPIT_HOST = ambienteOriginalHost;
+      (ambiente as Record<string, unknown>).MAILPIT_PORT = ambienteOriginalPort;
+    }
+  });
+
+  it("garante que o Mailpit não seja usado em produção para envio de código de verificação", async () => {
+    const spyCreateTransport = vi.spyOn(nodemailer, "createTransport");
+    const ambienteOriginalNodeEnv = ambiente.NODE_ENV;
+    const ambienteOriginalProvider = ambiente.EMAIL_PROVIDER;
+
+    try {
+      (ambiente as Record<string, unknown>).NODE_ENV = "production";
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = "mailpit";
+
+      const resultado = await enviarEmailVerificacao({
+        destinatario: "usuario@producao.com",
+        nome: "Usuario Producao",
+        codigo: "123456",
+      });
+
+      expect(resultado.sucesso).toBe(false);
+      expect(resultado.status).toBe("FALHA_ENVIO");
+      expect(resultado.motivo).toBe("MAILPIT_NAO_PERMITIDO_EM_PRODUCAO");
+      expect(spyCreateTransport).not.toHaveBeenCalled();
+    } finally {
+      (ambiente as Record<string, unknown>).NODE_ENV = ambienteOriginalNodeEnv;
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = ambienteOriginalProvider;
+    }
+  });
+
+  it("garante que o Mailpit não seja usado em produção para recuperação de senha", async () => {
+    const spyCreateTransport = vi.spyOn(nodemailer, "createTransport");
+    const ambienteOriginalNodeEnv = ambiente.NODE_ENV;
+    const ambienteOriginalProvider = ambiente.EMAIL_PROVIDER;
+
+    try {
+      (ambiente as Record<string, unknown>).NODE_ENV = "production";
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = "mailpit";
+
+      const resultado = await enviarEmailRecuperacaoSenha({
+        destinatario: "usuario@producao.com",
+        nome: "Usuario Producao",
+        token: "token-recuperacao-123",
+      });
+
+      expect(resultado.sucesso).toBe(false);
+      expect(resultado.status).toBe("FALHA_ENVIO");
+      expect(resultado.motivo).toBe("MAILPIT_NAO_PERMITIDO_EM_PRODUCAO");
+      expect(spyCreateTransport).not.toHaveBeenCalled();
+    } finally {
+      (ambiente as Record<string, unknown>).NODE_ENV = ambienteOriginalNodeEnv;
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = ambienteOriginalProvider;
+    }
+  });
+
+  it("permite o uso de transportador legítimo customizado em ambiente de produção", async () => {
+    const mockTransportador = {
+      options: {},
+      sendMail: vi.fn().mockResolvedValue({
+        messageId: "prod-msg-123",
+        accepted: ["cliente@producao.com"],
+        rejected: [],
+        response: "250 Message accepted",
+      }),
+    } as unknown as Transporter;
+
+    const ambienteOriginalNodeEnv = ambiente.NODE_ENV;
+
+    try {
+      (ambiente as Record<string, unknown>).NODE_ENV = "production";
+      definirTransportadorCustomizado(mockTransportador);
+
+      const resultado = await enviarEmailVerificacao({
+        destinatario: "cliente@producao.com",
+        nome: "Cliente Producao",
+        codigo: "654321",
+      });
+
+      expect(resultado.sucesso).toBe(true);
+      expect(resultado.status).toBe("ENVIADO");
+      expect(resultado.mensagemId).toBe("prod-msg-123");
+      expect(mockTransportador.sendMail).toHaveBeenCalled();
+    } finally {
+      (ambiente as Record<string, unknown>).NODE_ENV = ambienteOriginalNodeEnv;
+    }
+  });
+
+  it("trata falha de conexão (ECONNREFUSED) do Mailpit com o fluxo padrão FALHA_ENVIO/ERRO_DISPARO_SMTP", async () => {
+    const mockTransportador = {
+      options: {},
+      sendMail: vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:1025")),
+    } as unknown as Transporter;
+
+    const ambienteOriginalProvider = ambiente.EMAIL_PROVIDER;
+
+    try {
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = "mailpit";
+      definirTransportadorCustomizado(mockTransportador);
+
+      const resultado = await enviarEmailVerificacao({
+        destinatario: "usuario@teste.com",
+        nome: "Usuario Teste",
+        codigo: "123456",
+      });
+
+      expect(resultado.sucesso).toBe(false);
+      expect(resultado.status).toBe("FALHA_ENVIO");
+      expect(resultado.motivo).toBe("ERRO_DISPARO_SMTP");
+    } finally {
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = ambienteOriginalProvider;
+    }
+  });
+
+  it("trata timeout do servidor Mailpit classificando como INCERTO/TIMEOUT_RESPOSTA_SERVIDOR", async () => {
+    const mockTransportador = {
+      options: {},
+      sendMail: vi.fn().mockRejectedValue(new Error("ETIMEDOUT: Connection timed out")),
+    } as unknown as Transporter;
+
+    const ambienteOriginalProvider = ambiente.EMAIL_PROVIDER;
+
+    try {
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = "mailpit";
+      definirTransportadorCustomizado(mockTransportador);
+
+      const resultado = await enviarEmailVerificacao({
+        destinatario: "usuario@teste.com",
+        nome: "Usuario Teste",
+        codigo: "123456",
+      });
+
+      expect(resultado.sucesso).toBe(false);
+      expect(resultado.status).toBe("INCERTO");
+      expect(resultado.motivo).toBe("TIMEOUT_RESPOSTA_SERVIDOR");
+    } finally {
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = ambienteOriginalProvider;
+    }
+  });
+
+  it("envia e-mail de verificação com sucesso quando o Mailpit aceita com resposta 250 OK", async () => {
+    const mockTransportador = {
+      options: {},
+      sendMail: vi.fn().mockResolvedValue({
+        messageId: "mailpit-msg-456",
+        accepted: ["usuario@teste.com"],
+        rejected: [],
+        response: "250 2.0.0 Ok: queued",
+      }),
+    } as unknown as Transporter;
+
+    const ambienteOriginalProvider = ambiente.EMAIL_PROVIDER;
+
+    try {
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = "mailpit";
+      definirTransportadorCustomizado(mockTransportador);
+
+      const resultado = await enviarEmailVerificacao({
+        destinatario: "usuario@teste.com",
+        nome: "Usuario Teste",
+        codigo: "654321",
+      });
+
+      expect(resultado.sucesso).toBe(true);
+      expect(resultado.status).toBe("ENVIADO");
+      expect(resultado.mensagemId).toBe("mailpit-msg-456");
+      expect(resultado.previewUrl).toBeUndefined();
+    } finally {
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = ambienteOriginalProvider;
+    }
+  });
+
+  it("envia e-mail de recuperação de senha com sucesso através do Mailpit", async () => {
+    const mockTransportador = {
+      options: {},
+      sendMail: vi.fn().mockResolvedValue({
+        messageId: "mailpit-recup-789",
+        accepted: ["usuario@teste.com"],
+        rejected: [],
+        response: "250 2.0.0 Ok: queued",
+      }),
+    } as unknown as Transporter;
+
+    const ambienteOriginalProvider = ambiente.EMAIL_PROVIDER;
+
+    try {
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = "mailpit";
+      definirTransportadorCustomizado(mockTransportador);
+
+      const resultado = await enviarEmailRecuperacaoSenha({
+        destinatario: "usuario@teste.com",
+        nome: "Usuario Recuperacao",
+        token: "token-123456",
+      });
+
+      expect(resultado.sucesso).toBe(true);
+      expect(resultado.status).toBe("ENVIADO");
+      expect(resultado.mensagemId).toBe("mailpit-recup-789");
+      expect(resultado.previewUrl).toBeUndefined();
+    } finally {
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = ambienteOriginalProvider;
+    }
+  });
+});
+

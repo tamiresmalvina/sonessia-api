@@ -26,6 +26,8 @@ export interface ParametrosEnvioRecuperacaoSenha {
 
 // Handler customizado permitindo injeção/mock para testes automatizados
 let transportadorCustomizado: Transporter | null = null;
+let transportadorPadrao: Transporter | null = null;
+let provedorPadraoInstanciado: string | null = null;
 let interceptadorTeste: ((parametros: ParametrosEnvioCodigo) => Promise<ResultadoEnvioEmail>) | null = null;
 let interceptadorRecuperacaoTeste:
   | ((parametros: ParametrosEnvioRecuperacaoSenha) => Promise<ResultadoEnvioEmail>)
@@ -50,6 +52,8 @@ export function definirForcarExecucaoEtherealEmTestes(forcar: boolean): void {
 
 export function resetarTransportadorEthereal(): void {
   transportadorCustomizado = null;
+  transportadorPadrao = null;
+  provedorPadraoInstanciado = null;
 }
 
 function escaparHtml(texto: string): string {
@@ -65,20 +69,36 @@ export function definirTransportadorCustomizado(t: Transporter | null): void {
   transportadorCustomizado = t;
 }
 
-async function obterTransportador(): Promise<Transporter> {
+export async function obterTransportador(): Promise<Transporter> {
   if (transportadorCustomizado) {
     return transportadorCustomizado;
   }
 
   if (ambiente.NODE_ENV === "production") {
+    const nomeProvedor = ambiente.EMAIL_PROVIDER === "mailpit" ? "Mailpit" : "Ethereal";
     throw new Error(
-      "O provedor Ethereal não é permitido em ambiente de produção. Configure um transporte de e-mail de produção."
+      `O provedor ${nomeProvedor} não é permitido em ambiente de produção. Configure um transporte de e-mail de produção.`
     );
   }
 
-  // Ethereal como único provedor de desenvolvimento
+  if (transportadorPadrao && provedorPadraoInstanciado === ambiente.EMAIL_PROVIDER) {
+    return transportadorPadrao;
+  }
+
+  if (ambiente.EMAIL_PROVIDER === "mailpit") {
+    transportadorPadrao = nodemailer.createTransport({
+      host: ambiente.MAILPIT_HOST,
+      port: ambiente.MAILPIT_PORT,
+      secure: false,
+      ignoreTLS: true,
+    });
+    provedorPadraoInstanciado = "mailpit";
+    return transportadorPadrao;
+  }
+
+  // Ethereal como provedor padrão de desenvolvimento
   const contaTeste = await nodemailer.createTestAccount();
-  transportadorCustomizado = nodemailer.createTransport({
+  transportadorPadrao = nodemailer.createTransport({
     host: contaTeste.smtp.host,
     port: contaTeste.smtp.port,
     secure: contaTeste.smtp.secure,
@@ -87,8 +107,9 @@ async function obterTransportador(): Promise<Transporter> {
       pass: contaTeste.pass,
     },
   });
+  provedorPadraoInstanciado = "ethereal";
 
-  return transportadorCustomizado;
+  return transportadorPadrao;
 }
 
 export async function enviarEmailVerificacao(
@@ -108,13 +129,16 @@ export async function enviarEmailVerificacao(
     };
   }
 
-  // Em ambiente de produção, impede expressamente o uso do Ethereal
+  // Em ambiente de produção, impede expressamente o uso de Ethereal e Mailpit
   if (ambiente.NODE_ENV === "production" && !transportadorCustomizado) {
-    console.error("[ERRO_EMAIL_PRODUCAO]: O provedor Ethereal não é permitido em ambiente de produção.");
+    const ehMailpit = ambiente.EMAIL_PROVIDER === "mailpit";
+    console.error(
+      `[ERRO_EMAIL_PRODUCAO]: O provedor ${ehMailpit ? "Mailpit" : "Ethereal"} não é permitido em ambiente de produção.`
+    );
     return {
       sucesso: false,
       status: "FALHA_ENVIO",
-      motivo: "ETHEREAL_NAO_PERMITIDO_EM_PRODUCAO",
+      motivo: ehMailpit ? "MAILPIT_NAO_PERMITIDO_EM_PRODUCAO" : "ETHEREAL_NAO_PERMITIDO_EM_PRODUCAO",
     };
   }
 
@@ -122,14 +146,17 @@ export async function enviarEmailVerificacao(
   try {
     transportador = await obterTransportador();
   } catch (erro) {
+    const ehMailpit = ambiente.EMAIL_PROVIDER === "mailpit";
     console.error(
-      "[ERRO_ETHEREAL_CONTA]: Não foi possível inicializar a conta Ethereal.",
+      ehMailpit
+        ? "[ERRO_MAILPIT_INICIALIZACAO]: Não foi possível inicializar o transporte Mailpit."
+        : "[ERRO_ETHEREAL_CONTA]: Não foi possível inicializar a conta Ethereal.",
       erro instanceof Error ? erro.message : erro
     );
     return {
       sucesso: false,
       status: "FALHA_ENVIO",
-      motivo: "FALHA_INICIALIZACAO_ETHEREAL",
+      motivo: ehMailpit ? "FALHA_INICIALIZACAO_MAILPIT" : "FALHA_INICIALIZACAO_ETHEREAL",
     };
   }
 
@@ -210,6 +237,8 @@ export async function enviarEmailVerificacao(
 
     if (previewUrl && ambiente.NODE_ENV === "development") {
       console.log(`[E-mail Ethereal enviado]: Pré-visualização disponível em: ${previewUrl}`);
+    } else if (ambiente.EMAIL_PROVIDER === "mailpit" && ambiente.NODE_ENV === "development") {
+      console.log("[E-mail Mailpit enviado]: Visualização disponível na interface do Mailpit.");
     }
 
     return {
@@ -220,7 +249,11 @@ export async function enviarEmailVerificacao(
     };
   } catch (erro) {
     const mensagemErro = erro instanceof Error ? erro.message : String(erro);
-    console.error("[ERRO_ENVIO_EMAIL]: Falha ao disparar o e-mail pelo Ethereal.", mensagemErro);
+    const ehMailpit = ambiente.EMAIL_PROVIDER === "mailpit";
+    console.error(
+      `[ERRO_ENVIO_EMAIL]: Falha ao disparar o e-mail pelo ${ehMailpit ? "Mailpit" : "Ethereal"}.`,
+      mensagemErro
+    );
 
     // Se o erro ocorreu durante o diálogo após conexão iniciada, o resultado pode ser incerto
     const ehTimeout = /timeout|timed out|ETIMEDOUT|ESOCKET/i.test(mensagemErro);
@@ -249,13 +282,16 @@ export async function enviarEmailRecuperacaoSenha(
     };
   }
 
-  // Em ambiente de produção, impede expressamente o uso do Ethereal
+  // Em ambiente de produção, impede expressamente o uso de Ethereal e Mailpit
   if (ambiente.NODE_ENV === "production" && !transportadorCustomizado) {
-    console.error("[ERRO_EMAIL_PRODUCAO]: O provedor Ethereal não é permitido em ambiente de produção.");
+    const ehMailpit = ambiente.EMAIL_PROVIDER === "mailpit";
+    console.error(
+      `[ERRO_EMAIL_PRODUCAO]: O provedor ${ehMailpit ? "Mailpit" : "Ethereal"} não é permitido em ambiente de produção.`
+    );
     return {
       sucesso: false,
       status: "FALHA_ENVIO",
-      motivo: "ETHEREAL_NAO_PERMITIDO_EM_PRODUCAO",
+      motivo: ehMailpit ? "MAILPIT_NAO_PERMITIDO_EM_PRODUCAO" : "ETHEREAL_NAO_PERMITIDO_EM_PRODUCAO",
     };
   }
 
@@ -263,14 +299,17 @@ export async function enviarEmailRecuperacaoSenha(
   try {
     transportador = await obterTransportador();
   } catch (erro) {
+    const ehMailpit = ambiente.EMAIL_PROVIDER === "mailpit";
     console.error(
-      "[ERRO_ETHEREAL_CONTA]: Não foi possível inicializar a conta Ethereal.",
+      ehMailpit
+        ? "[ERRO_MAILPIT_INICIALIZACAO]: Não foi possível inicializar o transporte Mailpit."
+        : "[ERRO_ETHEREAL_CONTA]: Não foi possível inicializar a conta Ethereal.",
       erro instanceof Error ? erro.message : erro
     );
     return {
       sucesso: false,
       status: "FALHA_ENVIO",
-      motivo: "FALHA_INICIALIZACAO_ETHEREAL",
+      motivo: ehMailpit ? "FALHA_INICIALIZACAO_MAILPIT" : "FALHA_INICIALIZACAO_ETHEREAL",
     };
   }
 
@@ -356,6 +395,8 @@ export async function enviarEmailRecuperacaoSenha(
 
     if (previewUrl && ambiente.NODE_ENV === "development") {
       console.log(`[E-mail Ethereal enviado]: Pré-visualização disponível em: ${previewUrl}`);
+    } else if (ambiente.EMAIL_PROVIDER === "mailpit" && ambiente.NODE_ENV === "development") {
+      console.log("[E-mail Mailpit enviado]: Visualização disponível na interface do Mailpit.");
     }
 
     return {
@@ -366,7 +407,11 @@ export async function enviarEmailRecuperacaoSenha(
     };
   } catch (erro) {
     const mensagemErro = erro instanceof Error ? erro.message : String(erro);
-    console.error("[ERRO_ENVIO_EMAIL]: Falha ao disparar o e-mail pelo Ethereal.", mensagemErro);
+    const ehMailpit = ambiente.EMAIL_PROVIDER === "mailpit";
+    console.error(
+      `[ERRO_ENVIO_EMAIL]: Falha ao disparar o e-mail pelo ${ehMailpit ? "Mailpit" : "Ethereal"}.`,
+      mensagemErro
+    );
 
     const ehTimeout = /timeout|timed out|ETIMEDOUT|ESOCKET/i.test(mensagemErro);
     return {

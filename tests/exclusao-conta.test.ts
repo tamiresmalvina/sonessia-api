@@ -164,16 +164,15 @@ describe("Exclusão e reativação de conta", () => {
     });
   }
 
-  async function criarAudio(idUsuario: string, nome: string) {
+  async function criarAudio(idUsuario: string, titulo: string) {
     return prisma.audio.create({
       data: {
         idUsuario,
-        nome,
         descricao: null,
         categoria: CategoriaAudio.NATUREZA,
         arquivo: "referencia-nao-gerenciada-pelo-projeto",
-        titulo: nome,
-        tituloOriginal: nome,
+        titulo,
+        tituloOriginal: titulo,
         fonte: "teste",
         licenca: "teste",
       },

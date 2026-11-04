@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import { ambiente } from "./config/ambiente.js";
 import { tratadorDeErros } from "./middlewares/erro.middleware.js";
 import { rotasAutenticacao } from "./routes/autenticacao.routes.js";
+import { rotasAudios } from "./routes/audios.routes.js";
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.get("/status", (_req, res) => {
 });
 
 app.use("/autenticacao", rotasAutenticacao);
+app.use("/audios", rotasAudios);
 
 app.use((_req, res) => {
   res.status(404).json({

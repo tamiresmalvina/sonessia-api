@@ -159,10 +159,10 @@ model AmbienteSonoro {
 model Audio {
   idAudio        String         @id @default(uuid()) @db.Uuid
   idUsuario      String         @db.Uuid
-  nome           String
   descricao      String?
   categoria      CategoriaAudio
   arquivo        String
+  arquivoPublicId String?
   titulo         String
   tituloOriginal String
   fonte          String

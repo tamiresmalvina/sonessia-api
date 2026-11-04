@@ -22,17 +22,17 @@
 
 **Prioridade:** Must Have
 
-- [ ] Definir/modelar os dados do áudio (nome, categoria e demais campos necessários).
-- [ ] Validar os dados recebidos ao cadastrar um áudio.
-- [ ] Implementar cadastro de áudio para administrador autorizado.
-- [ ] Implementar consulta/listagem de áudios cadastrados.
+- [x] Definir/modelar os dados do áudio (titulo, tituloOriginal, categoria e demais campos necessários).
+- [x] Validar os dados recebidos ao cadastrar um áudio.
+- [x] Implementar cadastro de áudio para administrador autorizado.
+- [x] Implementar consulta/listagem de áudios cadastrados.
 - [ ] Organizar/filtrar os áudios por categoria.
-- [ ] Implementar consulta dos detalhes de um áudio, incluindo sua categoria.
-- [ ] Implementar edição dos dados de um áudio existente.
+- [x] Implementar consulta dos detalhes de um áudio, incluindo sua categoria.
+- [x] Implementar edição dos dados de um áudio existente.
 - [ ] Implementar desativação/remoção de áudio, distinguindo os efeitos de cada ação.
 - [ ] Garantir que áudios removidos ou desativados não sejam oferecidos no catálogo público.
-- [ ] Proteger operações administrativas por autenticação e autorização.
-- [ ] Testar validação, permissões, cadastro, listagem por categoria, edição e desativação/remoção.
+- [x] Proteger operações administrativas por autenticação e autorização.
+- [x] Testar validação, permissões, cadastro, listagem, edição e remoção de áudio.
 
 ## US02 — Criar e disponibilizar ambientes sonoros pré-configurados
 
@@ -55,7 +55,7 @@
 
 **Prioridade:** Must Have
 
-- [ ] Disponibilizar endpoint público para consultar os áudios disponíveis gratuitamente.
+- [x] Disponibilizar endpoint público para consultar os áudios disponíveis gratuitamente.
 - [ ] Retornar categorias dos áudios no catálogo.
 - [ ] Incluir a categoria nos dados de cada áudio retornado.
 - [ ] Garantir que somente áudios ativos e disponíveis sejam listados.

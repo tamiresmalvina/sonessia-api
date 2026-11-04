@@ -18,6 +18,7 @@ A persistência é feita em PostgreSQL por meio do Prisma ORM e de um único Pri
 - Argon2id para senhas.
 - Nodemailer com Ethereal e Mailpit; Ethereal/conta de teste é bloqueada em produção, assim como Mailpit.
 - Cloudinary para armazenamento de fotos privadas de perfil.
+- Cloudinary para armazenamento público de arquivos de áudio administrativos.
 - `express-rate-limit` para limites específicos das rotas.
 - Vitest, Supertest e um banco PostgreSQL de testes para testes automatizados.
 - Prisma migrations e seed via scripts TypeScript.
@@ -57,6 +58,7 @@ Os modelos `Audio`, `AmbienteSonoro`, `Colecao`, `ColecaoAmbienteSonoro` e `Ambi
 │   │   └── cloudinary.ts         # Configuração central do SDK Cloudinary
 │   ├── controllers/
 │   │   ├── autenticacao.controller.ts
+│   │   ├── audio.controller.ts
 │   │   └── foto-perfil.controller.ts
 │   ├── errors/app.error.ts       # Erro operacional tipado com status/código
 │   ├── middlewares/
@@ -67,9 +69,12 @@ Os modelos `Audio`, `AmbienteSonoro`, `Colecao`, `ColecaoAmbienteSonoro` e `Ambi
 │   │   ├── origem.middleware.ts
 │   │   ├── rate-limit.middleware.ts
 │   │   └── validacao.middleware.ts
-│   ├── routes/autenticacao.routes.ts
+│   ├── routes/
+│   │   ├── autenticacao.routes.ts
+│   │   └── audios.routes.ts
 │   ├── schemas/autenticacao.schema.ts
 │   ├── services/
+│   │   ├── audio.service.ts
 │   │   ├── autenticacao.service.ts
 │   │   ├── exclusao-conta.service.ts
 │   │   └── foto-perfil.service.ts
@@ -296,8 +301,7 @@ O fallback global para rota inexistente usa o mesmo objeto, mas não usa `next`.
 Com Nodemailer, Ethereal é usado fora da produção e cria uma conta de teste. Mailpit é configurado como transporte SMTP local. Ambos os provedores são explicitamente impedidos em produção. Em testes, os envios são simulados por padrão, com interceptadores disponíveis; forçar Ethereal em testes exige configuração explícita.
 
 ### Cloudinary
-
-Cloudinary é usado somente pelo fluxo de foto de perfil. O SDK é inicializado automaticamente se todas as credenciais estiverem presentes. Em produção, todas são exigidas; fora dela, podem estar ausentes. A operação falha com `AppError` seguro se o serviço não estiver configurado.
+Cloudinary é usado pelos fluxos de foto de perfil e de áudio. A foto usa recurso privado do tipo `image`; os áudios usam recurso público do tipo `video`, pois o SDK Cloudinary classifica arquivos de áudio nesse tipo. O SDK é inicializado automaticamente se todas as credenciais estiverem presentes. Em produção, todas são exigidas; fora dela, podem estar ausentes. A operação falha com `AppError` seguro se o serviço não estiver configurado.
 
 ### Configuração e execução
 

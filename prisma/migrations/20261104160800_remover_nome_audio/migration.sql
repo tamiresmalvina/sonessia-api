@@ -1,0 +1,1 @@
+ALTER TABLE "Audio" DROP COLUMN "nome";

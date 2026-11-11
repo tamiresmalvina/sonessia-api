@@ -44,7 +44,7 @@ flowchart LR
   ST --> PURGA[Rotina de purga de contas]
 ```
 
-Os modelos `Audio`, `AmbienteSonoro`, `Colecao`, `ColecaoAmbienteSonoro` e `AmbienteSonoroAudio` são componentes persistenciais existentes, mas não possuem, no estado atual, services, controllers ou rotas que os exponham.
+Os modelos `Audio`, `AmbienteSonoro` e `AmbienteSonoroAudio` possuem services, controllers e rotas implementados para gerenciamento de áudios e ambientes sonoros personalizados. Os modelos `Colecao` e `ColecaoAmbienteSonoro` são componentes persistenciais existentes, mas ainda não possuem endpoints de gerenciamento próprio.
 
 ## 2. Estrutura de diretórios relevante
 
@@ -57,8 +57,9 @@ Os modelos `Audio`, `AmbienteSonoro`, `Colecao`, `ColecaoAmbienteSonoro` e `Ambi
 │   │   ├── ambiente.ts           # Validação das variáveis de ambiente
 │   │   └── cloudinary.ts         # Configuração central do SDK Cloudinary
 │   ├── controllers/
-│   │   ├── autenticacao.controller.ts
+│   │   ├── ambiente-sonoro.controller.ts
 │   │   ├── audio.controller.ts
+│   │   ├── autenticacao.controller.ts
 │   │   └── foto-perfil.controller.ts
 │   ├── errors/app.error.ts       # Erro operacional tipado com status/código
 │   ├── middlewares/
@@ -70,10 +71,15 @@ Os modelos `Audio`, `AmbienteSonoro`, `Colecao`, `ColecaoAmbienteSonoro` e `Ambi
 │   │   ├── rate-limit.middleware.ts
 │   │   └── validacao.middleware.ts
 │   ├── routes/
-│   │   ├── autenticacao.routes.ts
-│   │   └── audios.routes.ts
-│   ├── schemas/autenticacao.schema.ts
+│   │   ├── ambientes-sonoros.routes.ts
+│   │   ├── audios.routes.ts
+│   │   └── autenticacao.routes.ts
+│   ├── schemas/
+│   │   ├── ambiente-sonoro.schema.ts
+│   │   ├── audio.schema.ts
+│   │   └── autenticacao.schema.ts
 │   ├── services/
+│   │   ├── ambiente-sonoro.service.ts
 │   │   ├── audio.service.ts
 │   │   ├── autenticacao.service.ts
 │   │   ├── exclusao-conta.service.ts
@@ -183,15 +189,22 @@ A migração inicial cria UUID para usuários? O Prisma atual confirma `Usuario.
 - `TokenRecuperacaoSenha`: hash único, expiração, uso e relação cascata.
 - `AlteracaoEmail`: estado dos tokens de confirmação do e-mail atual e novo, hash único, expiração, timestamps e índices.
 
-#### Catálogo de áudio e organização — apenas persistência
+#### Catálogo de áudio e ambientes sonoros
 
-- `Audio` pertence a `Usuario`, possui enum de categoria e metadados de licença/fonte/arquivo/título.
-- `AmbienteSonoro` pertence a `Usuario`, possui enum de finalidade, metadados, imagem e data de criação.
-- `Colecao` pertence a `Usuario` e contém nome e descrição.
-- `ColecaoAmbienteSonoro` é associação muitos-para-muitos, com chave composta.
-- `AmbienteSonoroAudio` associa ambiente e áudio, com chave composta e volume inteiro.
-
-As relações de catálogo/coleções usam `ON DELETE RESTRICT`; os registros de autenticação usam exclusão em cascata em vários fluxos. Nenhum endpoint implementado consulta ou altera esses registros atualmente.
+- `Audio` pertence a `Usuario`, possui enum de categoria e metadados de licença/fonte/arquivo/título, armazenado com upload público de áudio no Cloudinary (`arquivoPublicId` privado).
+- `AmbienteSonoro` modela os dois tipos de ambientes suportados pela API:
+  - **Ambientes pré-configurados (públicos):** Cadastrados exclusivamente por administradores (`Perfil.ADMIN`) com `origem: "preconfigurado"`. O campo `publicado: Boolean @default(false)` controla a disponibilidade pública: quando `true`, o ambiente aparece no catálogo público; quando `false`, permanece despublicado (visível apenas para admins no painel administrativo).
+  - **Ambientes personalizados (privados):** Cadastrados por usuários autenticados com `origem: "personalizado"` e `publicado: false`. Pertencem exclusivamente ao seu criador (`idUsuario`), não aparecem no catálogo público e são isolados por usuário.
+- `AmbienteSonoroAudio` associa ambiente e áudio com chave composta `[idAmbienteSonoro, idAudio]` e armazena a configuração individual de volume de cada som na composição.
+- **Escala e armazenamento de volume:** O volume é armazenado exclusivamente na tabela intermediária `AmbienteSonoroAudio`, adotando uma escala inteira de 0 a 100 (inclusivo). O modelo `Audio` não armazena volume diretamente, permitindo reutilizar o mesmo áudio em múltiplos ambientes (públicos ou privados) com intensidades sonoras diferentes.
+- **Validação de composição:** Cada ambiente deve conter ao menos um áudio, sem repetição de IDs de áudio na mesma composição, com volumes válidos (0 a 100) e validação prévia de existência no catálogo antes da persistência.
+- **Transações e integridade:** Criação e alteração de ambientes e suas composições ocorrem em transações Prisma. A exclusão de um ambiente (personalizado ou pré-configurado) remove em transação as associações em `AmbienteSonoroAudio` e `ColecaoAmbienteSonoro`, respeitando o `ON DELETE RESTRICT` do banco de dados sem excluir áudios do catálogo ou coleções.
+- **Isolamento, autorização e DTO:**
+  - O catálogo público (`/ambientes-sonoros/publicos`) é aberto e retorna apenas ambientes pré-configurados publicados, permitindo filtros por finalidade.
+  - A administração (`/ambientes-sonoros/pre-configurados`) exige autenticação e `exigirPerfil(Perfil.ADMIN)`.
+  - O gerenciamento de personalizados (`/ambientes-sonoros`) é privado e isolado por `req.usuario.id`. Usuários e administradores acessam apenas seus próprios ambientes pessoais, retornando HTTP 404 para recursos inexistentes ou de outros usuários para evitar vazamento de existência.
+  - Respostas DTO incluem metadados públicos e URLs de reprodução dos áudios, excluindo campos privados (`arquivoPublicId`, `idUsuario`).
+- `Colecao` pertence a `Usuario` e `ColecaoAmbienteSonoro` é associação muitos-para-muitos (gerenciamento próprio ainda não exposto).
 
 ### Relações
 
@@ -243,13 +256,30 @@ Protegidos por `autenticar` atualmente:
 - `PATCH /autenticacao/eu`.
 - `PATCH /autenticacao/eu/data-nascimento`.
 - Solicitação e confirmação de alteração de e-mail.
+- `POST/GET /ambientes-sonoros` (criação e listagem de ambientes sonoros personalizados, com alias `/ambientes`).
+- `GET/PATCH/PUT/DELETE /ambientes-sonoros/:idAmbienteSonoro` (consulta, edição e exclusão de ambiente próprio, com alias `/ambientes/:idAmbienteSonoro`).
+
+Protegidos por `autenticar` e `exigirPerfil(ADMIN)`:
+
+- `POST /audios` (cadastro administrativo de áudio no catálogo com upload).
+- `PATCH /audios/:idAudio` (atualização de metadados do áudio).
+- `PUT /audios/:idAudio/arquivo` (substituição do arquivo do áudio).
+- `DELETE /audios/:idAudio` (exclusão de áudio sem associações).
+- `POST /ambientes-sonoros/pre-configurados` (criação de ambiente pré-configurado administrativo).
+- `GET /ambientes-sonoros/pre-configurados` (listagem administrativa com rascunhos e publicados).
+- `GET /ambientes-sonoros/pre-configurados/:idAmbienteSonoro` (consulta administrativa de ambiente pré-configurado).
+- `PATCH/PUT /ambientes-sonoros/pre-configurados/:idAmbienteSonoro` (edição de metadados e composição por ADMIN).
+- `PATCH /ambientes-sonoros/pre-configurados/:idAmbienteSonoro/publicacao` (publicação e despublicação por ADMIN).
+- `DELETE /ambientes-sonoros/pre-configurados/:idAmbienteSonoro` (exclusão de ambiente pré-configurado por ADMIN).
 
 Públicos ou sem autenticação obrigatória na implementação atual:
 
 - cadastro, verificação, reenvio, login, renovação, logout, recuperação, redefinição, reativação;
-- `/status`.
-
-A alteração de nome/data não possui rate limit próprio no router, embora tenha validação/autenticação. Não há endpoints de negócio administrativo ou catálogo protegidos por `exigirPerfil`; o middleware RBAC está implementado e coberto por testes unitários/integrados, mas não usado em rotas produtivas.
+- `/status`;
+- `GET /audios` e `GET /audios/:idAudio` (consulta pública do catálogo de áudios).
+- `GET /ambientes-sonoros/publicos` (listagem pública de ambientes pré-configurados publicados, com filtro por `finalidade`).
+- `GET /ambientes-sonoros/publicos/finalidades` e `GET /ambientes-sonoros/finalidades` (listagem pública de finalidades disponíveis).
+- `GET /ambientes-sonoros/publicos/:idAmbienteSonoro` (consulta pública de ambiente pré-configurado publicado).
 
 ### Foto de perfil e exclusão
 
@@ -324,10 +354,16 @@ Os testes de integração dependem de um PostgreSQL específico para testes ou d
 
 | Scope/User Story                                                   | Evidência atual                                                  | Estado arquitetural                                                            |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| US05 — cadastro, perfil após autenticação                          | `cadastro`, `login`, `/eu`, services e testes de cadastro/perfil | **Implementado; perfil pessoal implementado apenas para dados básicos e foto** |
+| US01 — Áudios do catálogo (admin)                                  | Rotas `/audios`, controller, service, schema Zod e testes de catálogo | **Implementado; cadastro com upload Cloudinary, edição, substituição de arquivo e exclusão administrativa** |
+| US02 — Ambientes sonoros pré-configurados                          | Rotas `/ambientes-sonoros/pre-configurados`, controller, service, schemas e testes em `tests/ambiente-preconfigurado.test.ts` | **Implementado; cadastro, listagem, consulta, edição, publicação/despublicação e exclusão protegida por ADMIN, com composição e volumes individuais (0 a 100)** |
+| US03 — Catálogo público de áudios                                  | Rotas `GET /audios` e `GET /audios/:idAudio`, service e testes   | **Implementado; listagem e consulta pública com metadados e URLs seguras**   |
+| US05 — Ambientes sonoros personalizados                            | Rotas `/ambientes-sonoros` (alias `/ambientes`), controller, service, schema Zod e 22 testes em `tests/ambiente-sonoro.test.ts` | **Implementado; criação com composição, volumes individuais (0 a 100), listagem, consulta, edição transacional, exclusão protegida e isolamento rigoroso por usuário** |
+| US05 — cadastro, perfil após autenticação                          | `cadastro`, `login`, `/eu`, services e testes de cadastro/perfil | **Implementado; perfil pessoal implementado para dados básicos e foto**        |
+| US08 — Filtragem e consulta de ambientes públicos                  | Rotas `/ambientes-sonoros/publicos`, `/ambientes-sonoros/publicos/finalidades`, schemas e testes | **Implementado; listagem pública com filtro opcional por enum de finalidade, consulta por ID e ocultação rigorosa de rascunhos e personalizados** |
 | Conta e autenticação                                               | JWT, refresh cookie, sessões, verificação e recuperação          | **Implementado; coberto por múltiplos testes**                                 |
 | Gestão do usuário                                                  | nome, nascimento, e-mail, exclusão/reactivação                   | **Implementado**                                                               |
 | Foto de perfil (complemento não listado no mesmo detalhe em TASKS) | rotas, middleware, service e Cloudinary                          | **Implementado**, condicionado à configuração Cloudinary                       |
+| US14 — Recursos públicos e proteção de rotas                       | Rotas públicas (`/status`, `/audios`, `/ambientes-sonoros/publicos`) e middlewares de proteção | **Implementado; recursos públicos acessíveis sem autenticação e endpoints privados/admin rigorosamente protegidos** |
 
 A existência e quantidade dos testes indicam maior certeza do que os boxes de `TASKS.md`, mas o arquivo exige confirmação independente de subtarefas específicas. Não há evidência de que toda possibilidade descrita tenha sido coberta pela suite; o estado abaixo é factual sobre código.
 
@@ -335,13 +371,8 @@ A existência e quantidade dos testes indicam maior certeza do que os boxes de `
 
 | User Story                              | O que existe                                                         | Falta                                                                                                       |
 | --------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| US01 — Áudios do catálogo               | Prisma `Audio`, enum de categoria e relação com usuário              | Rotas, validação, controller, service e autorização administrativa; estados de ativo/disponível não existem |
-| US02/US08 — Ambientes pré-configurados  | Modelos de ambiente, finalidade, áudio-composição e volumes          | Publicação/estado, endpoints públicos, filtros por finalidade, serviços e testes; `finalidade` é enum fixo  |
-| US03 — Catálogo público                 | `Audio` possui metadados/categoria                                   | Rotas públicas, filtros ativos, DTO e validação de disponibilidade                                          |
 | US04 — Composição temporária/reprodução | Relação ambiente-áudio com volume; modelo de persistência            | Contrato de composição temporária, validação de disponibilidade, URLs/negócio e endpoints                   |
-| US05 — Ambientes personalizados         | Modelos `AmbienteSonoro` e associação com usuário                    | Rotas de salvar/listar/consultar, ownership, validação e testes de isolamento                               |
 | US06 — Coleções                         | Modelos `Colecao` e associação com ambientes                         | Rotas e services para CRUD/associação; isolamento de usuário; testes                                        |
-| US14 — Recursos públicos                | `/status` e infraestrutura de autenticação/rotas públicas protegidas | Catálogo público, composição pública e ambientes públicos ainda inexistentes                                |
 
 A parte de cadastro, perfil e proteção pessoal da US14 está suportada. Não se deve considerar a parte de catálogo/armazenamento implementada porque só os modelos persistentes existem.
 
@@ -357,13 +388,12 @@ A divisão de responsabilidade da reprodução permanece pendente: não há play
 
 ### Lacunas observadas no código
 
-- Não há um módulo de catálogo além dos modelos Prisma.
-- Não há um campo comprovado de publicação, disponibilidade, ativação ou remoção em áudio/ambiente. Os enums existem, mas não cobrem estado publicável.
-- Não há schemas Zod, rotas, controllers ou services para áudio, ambiente, finalidade, composição ou coleção.
-- Não há uso produtivo de `exigirPerfil`; administrar catálogo/ambientes ainda não tem segurança implementada.
-- Não há contrato de DTO para os dados sonoros nem fonte/URL de reprodução pública.
-- Os modelos Prisma não são suficientes para garantir isolamento de usuário: as regras precisam existir nas consultas e controllers/services futuros.
-- Não há testes para recursos US01–US09, US13 ou US14 além dos já existentes de usuário/autenticação.
+- Os módulos de catálogo de áudios (administrativo e público), de ambientes sonoros personalizados e de ambientes sonoros pré-configurados/públicos (com publicação, composição e volumes) estão implementados e testados.
+- Coleções (`Colecao` e `ColecaoAmbienteSonoro`) (US06) ainda não possuem rotas, controllers ou services próprios.
+- O campo `publicado: Boolean @default(false)` foi adicionado em `AmbienteSonoro` via migration, com índices compostos `[origem, publicado]` e `[finalidade, publicado]`.
+- O controle de acesso administrativo com `exigirPerfil(Perfil.ADMIN)` está ativo nas mutações de `/audios` e no gerenciamento completo de `/ambientes-sonoros/pre-configurados`. O módulo `/ambientes-sonoros` (sem `/pre-configurados`) é restrito ao escopo do usuário autenticado (`autenticar`), com isolamento por `req.usuario.id`.
+- O catálogo público (`/ambientes-sonoros/publicos`) é aberto e expõe exclusivamente ambientes pré-configurados marcados como publicados (`origem = "preconfigurado"` e `publicado = true`), filtrando por `finalidade` quando fornecida.
+
 
 ### Decisões pendentes a confirmar
 

@@ -38,18 +38,18 @@
 
 **Prioridade:** Should Have
 
-- [ ] Definir/modelar ambiente sonoro pré-configurado (nome, descrição, finalidade e estado de disponibilidade).
-- [ ] Definir/modelar a relação entre ambiente e os áudios que o compõem.
-- [ ] Permitir selecionar e adicionar áudios à composição de um ambiente.
-- [ ] Permitir configurar o volume individual de cada áudio da composição.
-- [ ] Validar os dados e a composição informados ao criar um ambiente.
-- [ ] Associar o ambiente a uma finalidade disponível.
-- [ ] Implementar criação e edição de ambientes pré-configurados.
-- [ ] Implementar disponibilização/publicação e impedir que ambientes não publicados apareçam para usuários.
-- [ ] Listar ambientes publicados por finalidade.
-- [ ] Retornar a composição e os volumes configurados para reprodução.
-- [ ] Proteger gerenciamento de ambientes para administradores autorizados.
-- [ ] Testar composição, volumes individuais, finalidade, publicação e acesso público.
+- [x] Definir/modelar ambiente sonoro pré-configurado (nome, descrição, finalidade e estado de disponibilidade).
+- [x] Definir/modelar a relação entre ambiente e os áudios que o compõem.
+- [x] Permitir selecionar e adicionar áudios à composição de um ambiente.
+- [x] Permitir configurar o volume individual de cada áudio da composição.
+- [x] Validar os dados e a composição informados ao criar um ambiente.
+- [x] Associar o ambiente a uma finalidade disponível.
+- [x] Implementar criação e edição de ambientes pré-configurados.
+- [x] Implementar disponibilização/publicação e impedir que ambientes não publicados apareçam para usuários.
+- [x] Listar ambientes publicados por finalidade.
+- [x] Retornar a composição e os volumes configurados para reprodução.
+- [x] Proteger gerenciamento de ambientes para administradores autorizados.
+- [x] Testar composição, volumes individuais, finalidade, publicação e acesso público.
 
 ## US03 — Consultar catálogo gratuito de áudios
 
@@ -84,13 +84,13 @@
 - [x] Implementar cadastro de usuário (informado como concluído).
 - [x] Validar os dados de cadastro (parte da funcionalidade de cadastro; confirmar cobertura de testes).
 - [x] Disponibilizar perfil após cadastro/autenticação (confirmar endpoint de consulta de perfil).
-- [ ] Definir/modelar ambientes sonoros personalizados salvos pelo usuário.
-- [ ] Implementar salvamento de uma composição com nome escolhido pelo usuário.
-- [ ] Associar cada ambiente salvo ao usuário autenticado.
-- [ ] Implementar listagem dos ambientes salvos pelo usuário autenticado.
-- [ ] Implementar consulta de um ambiente salvo pertencente ao usuário.
-- [ ] Garantir que um usuário não consiga consultar ou alterar ambientes salvos de outro usuário.
-- [ ] Testar salvar, listar, consultar e isolamento entre usuários.
+- [x] Definir/modelar ambientes sonoros personalizados salvos pelo usuário.
+- [x] Implementar salvamento de uma composição com nome escolhido pelo usuário.
+- [x] Associar cada ambiente salvo ao usuário autenticado.
+- [x] Implementar listagem dos ambientes salvos pelo usuário autenticado.
+- [x] Implementar consulta de um ambiente salvo pertencente ao usuário.
+- [x] Garantir que um usuário não consiga consultar ou alterar ambientes salvos de outro usuário.
+- [x] Testar salvar, listar, consultar e isolamento entre usuários.
 
 ## US06 — Organizar ambientes salvos em coleções
 
@@ -123,13 +123,13 @@
 
 **Prioridade:** Should Have
 
-- [ ] Disponibilizar consulta pública de finalidades disponíveis.
-- [ ] Disponibilizar listagem de ambientes publicados agrupados/filtráveis por finalidade.
-- [ ] Permitir consultar ambientes de uma finalidade específica.
-- [ ] Retornar detalhes básicos do ambiente (nome, descrição e sons componentes).
-- [ ] Retornar os volumes configurados para cada áudio do ambiente.
-- [ ] Garantir que ambientes não publicados ou indisponíveis não apareçam na consulta pública.
-- [ ] Testar consulta por finalidade, detalhes e composição do ambiente.
+- [x] Disponibilizar consulta pública de finalidades disponíveis.
+- [x] Disponibilizar listagem de ambientes publicados agrupados/filtráveis por finalidade.
+- [x] Permitir consultar ambientes de uma finalidade específica.
+- [x] Retornar detalhes básicos do ambiente (nome, descrição e sons componentes).
+- [x] Retornar os volumes configurados para cada áudio do ambiente.
+- [x] Garantir que ambientes não publicados ou indisponíveis não apareçam na consulta pública.
+- [x] Testar consulta por finalidade, detalhes e composição do ambiente.
 
 ## US09 — Alternar tema claro/escuro
 
@@ -163,8 +163,8 @@
 - [ ] Permitir consulta pública do catálogo sem autenticação.
 - [ ] Permitir obter os dados necessários para montar uma composição sem autenticação.
 - [ ] Garantir que operações de leitura pública não exijam token JWT.
-- [ ] Permitir consultar ambientes pré-configurados publicados sem autenticação.
-- [ ] Garantir que os dados necessários à reprodução de ambientes públicos estejam acessíveis sem autenticação.
+- [x] Permitir consultar ambientes pré-configurados publicados sem autenticação.
+- [x] Garantir que os dados necessários à reprodução de ambientes públicos estejam acessíveis sem autenticação.
 - [ ] Exigir autenticação para salvar uma composição no perfil.
 - [ ] Exigir autenticação para criar coleções e usar outras funcionalidades de armazenamento pessoal.
 - [ ] Retornar resposta de autenticação clara e consistente ao tentar salvar sem estar autenticado.

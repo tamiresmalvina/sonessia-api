@@ -149,11 +149,15 @@ model AmbienteSonoro {
   fonteImagem          String?
   licencaImagem        String?
   dataCriacao          DateTime   @default(now())
+  publicado            Boolean    @default(false)
 
   usuario Usuario @relation(fields: [idUsuario], references: [id])
 
   colecoes ColecaoAmbienteSonoro[]
   audios   AmbienteSonoroAudio[]
+
+  @@index([origem, publicado])
+  @@index([finalidade, publicado])
 }
 
 model Audio {

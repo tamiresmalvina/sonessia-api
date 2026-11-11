@@ -2,7 +2,10 @@ import type { NextFunction, Request, Response } from "express";
 import { Finalidade } from "../../generated/prisma/enums.js";
 import { AppError } from "../errors/app.error.js";
 import * as servicoAmbienteSonoro from "../services/ambiente-sonoro.service.js";
-import { schemaFiltroAmbientesPublicos } from "../schemas/ambiente-sonoro.schema.js";
+import {
+  schemaFiltroAmbientesPublicos,
+  schemaFiltroAmbientesSonoros,
+} from "../schemas/ambiente-sonoro.schema.js";
 
 function idUsuario(req: Request): string {
   if (!req.usuario) {
@@ -37,7 +40,12 @@ export async function criarAmbienteSonoro(req: Request, res: Response, next: Nex
 
 export async function listarAmbientesSonoros(req: Request, res: Response, next: NextFunction) {
   try {
-    const ambientes = await servicoAmbienteSonoro.listarAmbientesSonoros(idUsuario(req));
+    const filtro = schemaFiltroAmbientesSonoros.parse(req.query);
+    const opcoes: { semColecao?: boolean } = {};
+    if (filtro.semColecao !== undefined) {
+      opcoes.semColecao = filtro.semColecao;
+    }
+    const ambientes = await servicoAmbienteSonoro.listarAmbientesSonoros(idUsuario(req), opcoes);
     res.status(200).json({ ambientes });
   } catch (erro) {
     next(erro);

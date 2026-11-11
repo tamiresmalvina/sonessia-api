@@ -204,7 +204,13 @@ A migração inicial cria UUID para usuários? O Prisma atual confirma `Usuario.
   - A administração (`/ambientes-sonoros/pre-configurados`) exige autenticação e `exigirPerfil(Perfil.ADMIN)`.
   - O gerenciamento de personalizados (`/ambientes-sonoros`) é privado e isolado por `req.usuario.id`. Usuários e administradores acessam apenas seus próprios ambientes pessoais, retornando HTTP 404 para recursos inexistentes ou de outros usuários para evitar vazamento de existência.
   - Respostas DTO incluem metadados públicos e URLs de reprodução dos áudios, excluindo campos privados (`arquivoPublicId`, `idUsuario`).
-- `Colecao` pertence a `Usuario` e `ColecaoAmbienteSonoro` é associação muitos-para-muitos (gerenciamento próprio ainda não exposto).
+- `Colecao` pertence a `Usuario` e organiza ambientes sonoros personalizados em agrupamentos lógicos:
+  - Exclusivo para usuários com perfil `COMUM` (`exigirPerfil(Perfil.COMUM)`). Usuários `ADMIN` são bloqueados de gerenciar coleções.
+  - Coleções podem ser criadas vazias ou com metadados opcionais.
+  - Uma coleção pertence a um único usuário; o mesmo ambiente personalizado pode pertencer a múltiplas coleções do mesmo usuário.
+  - Ambientes pré-configurados/públicos (`origem: "preconfigurado"`) não podem ser adicionados a coleções.
+  - A desassociação de um ambiente ou a exclusão de uma coleção remove apenas os registros intermediários em `ColecaoAmbienteSonoro`, preservando intactos os registros de `AmbienteSonoro` e `Audio`.
+  - A listagem geral de ambientes personalizados (`GET /ambientes-sonoros`) inclui as coleções associadas e suporta filtragem de ambientes avulsos via query param `?semColecao=true` (`colecoes: { none: {} }`).
 
 ### Relações
 
@@ -258,6 +264,16 @@ Protegidos por `autenticar` atualmente:
 - Solicitação e confirmação de alteração de e-mail.
 - `POST/GET /ambientes-sonoros` (criação e listagem de ambientes sonoros personalizados, com alias `/ambientes`).
 - `GET/PATCH/PUT/DELETE /ambientes-sonoros/:idAmbienteSonoro` (consulta, edição e exclusão de ambiente próprio, com alias `/ambientes/:idAmbienteSonoro`).
+
+Protegidos por `autenticar` e `exigirPerfil(COMUM)`:
+
+- `POST /colecoes` (criação de coleção, vazia ou com descrição).
+- `GET /colecoes` (listagem de coleções do usuário com contagem e resumo de ambientes).
+- `GET /colecoes/:idColecao` (consulta detalhada de coleção com composição dos ambientes associados).
+- `PATCH/PUT /colecoes/:idColecao` (atualização de nome e descrição da coleção).
+- `DELETE /colecoes/:idColecao` (exclusão de coleção e desassociação em cascata controlada, sem excluir ambientes).
+- `POST /colecoes/:idColecao/ambientes` (associação unitária de ambiente personalizado à coleção).
+- `DELETE /colecoes/:idColecao/ambientes/:idAmbienteSonoro` (remoção de ambiente da coleção, sem excluir o ambiente salvo).
 
 Protegidos por `autenticar` e `exigirPerfil(ADMIN)`:
 
@@ -359,6 +375,7 @@ Os testes de integração dependem de um PostgreSQL específico para testes ou d
 | US03 — Catálogo público de áudios                                  | Rotas `GET /audios` e `GET /audios/:idAudio`, service e testes   | **Implementado; listagem e consulta pública com metadados e URLs seguras**   |
 | US05 — Ambientes sonoros personalizados                            | Rotas `/ambientes-sonoros` (alias `/ambientes`), controller, service, schema Zod e 22 testes em `tests/ambiente-sonoro.test.ts` | **Implementado; criação com composição, volumes individuais (0 a 100), listagem, consulta, edição transacional, exclusão protegida e isolamento rigoroso por usuário** |
 | US05 — cadastro, perfil após autenticação                          | `cadastro`, `login`, `/eu`, services e testes de cadastro/perfil | **Implementado; perfil pessoal implementado para dados básicos e foto**        |
+| US06 — Coleções sonoras (organização de ambientes)                 | Rotas `/colecoes`, controller, service, schema Zod e 20 testes em `tests/colecao.test.ts` | **Implementado; CRUD completo restrito a COMUM, associação/desassociação de ambientes, proteção contra duplicação, suporte a ambientes em múltiplas coleções, preservação total dos ambientes sonoros e filtro `?semColecao=true`** |
 | US08 — Filtragem e consulta de ambientes públicos                  | Rotas `/ambientes-sonoros/publicos`, `/ambientes-sonoros/publicos/finalidades`, schemas e testes | **Implementado; listagem pública com filtro opcional por enum de finalidade, consulta por ID e ocultação rigorosa de rascunhos e personalizados** |
 | Conta e autenticação                                               | JWT, refresh cookie, sessões, verificação e recuperação          | **Implementado; coberto por múltiplos testes**                                 |
 | Gestão do usuário                                                  | nome, nascimento, e-mail, exclusão/reactivação                   | **Implementado**                                                               |
@@ -372,7 +389,6 @@ A existência e quantidade dos testes indicam maior certeza do que os boxes de `
 | User Story                              | O que existe                                                         | Falta                                                                                                       |
 | --------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | US04 — Composição temporária/reprodução | Relação ambiente-áudio com volume; modelo de persistência            | Contrato de composição temporária, validação de disponibilidade, URLs/negócio e endpoints                   |
-| US06 — Coleções                         | Modelos `Colecao` e associação com ambientes                         | Rotas e services para CRUD/associação; isolamento de usuário; testes                                        |
 
 A parte de cadastro, perfil e proteção pessoal da US14 está suportada. Não se deve considerar a parte de catálogo/armazenamento implementada porque só os modelos persistentes existem.
 
@@ -388,11 +404,12 @@ A divisão de responsabilidade da reprodução permanece pendente: não há play
 
 ### Lacunas observadas no código
 
-- Os módulos de catálogo de áudios (administrativo e público), de ambientes sonoros personalizados e de ambientes sonoros pré-configurados/públicos (com publicação, composição e volumes) estão implementados e testados.
-- Coleções (`Colecao` e `ColecaoAmbienteSonoro`) (US06) ainda não possuem rotas, controllers ou services próprios.
-- O campo `publicado: Boolean @default(false)` foi adicionado em `AmbienteSonoro` via migration, com índices compostos `[origem, publicado]` e `[finalidade, publicado]`.
-- O controle de acesso administrativo com `exigirPerfil(Perfil.ADMIN)` está ativo nas mutações de `/audios` e no gerenciamento completo de `/ambientes-sonoros/pre-configurados`. O módulo `/ambientes-sonoros` (sem `/pre-configurados`) é restrito ao escopo do usuário autenticado (`autenticar`), com isolamento por `req.usuario.id`.
-- O catálogo público (`/ambientes-sonoros/publicos`) é aberto e expõe exclusivamente ambientes pré-configurados marcados como publicados (`origem = "preconfigurado"` e `publicado = true`), filtrando por `finalidade` quando fornecida.
+- Os módulos de catálogo de áudios (administrativo e público), de ambientes sonoros personalizados, de ambientes sonoros pré-configurados/públicos (com publicação, composição e volumes) e de coleções sonoras (organização de ambientes por usuário) estão implementados e testados.
+- O campo `publicado: Boolean @default(false)` em `AmbienteSonoro` controla a visibilidade pública de pré-configurados, com índices compostos `[origem, publicado]` e `[finalidade, publicado]`.
+- O controle de acesso administrativo com `exigirPerfil(Perfil.ADMIN)` está ativo nas mutações de `/audios` e no gerenciamento completo de `/ambientes-sonoros/pre-configurados`.
+- O módulo de coleções (`/colecoes`) é restrito exclusivamente a usuários com perfil `COMUM` (`exigirPerfil(Perfil.COMUM)`), bloqueando o acesso de administradores com HTTP 403.
+- A listagem geral de ambientes personalizados (`GET /ambientes-sonoros`) inclui a listagem das coleções associadas a cada ambiente e oferece suporte ao parâmetro de consulta `?semColecao=true` para recuperar apenas ambientes não categorizados.
+- A exclusão de coleções ou desassociação de ambientes não afeta a persistência física dos ambientes sonoros ou de seus áudios.
 
 
 ### Decisões pendentes a confirmar

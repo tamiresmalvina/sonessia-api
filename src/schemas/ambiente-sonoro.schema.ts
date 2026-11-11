@@ -138,10 +138,28 @@ export const schemaFiltroAmbientesPublicos = z
   })
   .strict();
 
+export const schemaFiltroAmbientesSonoros = z
+  .object({
+    semColecao: z
+      .union([z.boolean(), z.string()])
+      .optional()
+      .transform((val) => {
+        if (typeof val === "boolean") return val;
+        if (typeof val === "string") {
+          const lower = val.trim().toLowerCase();
+          if (lower === "true" || lower === "1") return true;
+          if (lower === "false" || lower === "0") return false;
+        }
+        return undefined;
+      }),
+  })
+  .strict();
+
 export type EntradaCriarAmbienteSonoro = z.infer<typeof schemaCriarAmbienteSonoro>;
 export type EntradaAtualizarAmbienteSonoro = z.infer<typeof schemaAtualizarAmbienteSonoro>;
 export type EntradaCriarAmbientePreConfigurado = z.infer<typeof schemaCriarAmbientePreConfigurado>;
 export type EntradaAtualizarAmbientePreConfigurado = z.infer<typeof schemaAtualizarAmbientePreConfigurado>;
 export type EntradaPublicacaoAmbiente = z.infer<typeof schemaPublicacaoAmbiente>;
 export type FiltroAmbientesPublicos = z.infer<typeof schemaFiltroAmbientesPublicos>;
+export type FiltroAmbientesSonoros = z.infer<typeof schemaFiltroAmbientesSonoros>;
 export type ItemComposicaoAudio = z.infer<typeof itemComposicaoAudioSchema>;

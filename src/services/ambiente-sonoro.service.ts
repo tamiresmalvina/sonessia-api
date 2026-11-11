@@ -48,7 +48,14 @@ interface ItemComposicaoBanco {
   audio: AudioBanco;
 }
 
-interface AmbienteBanco {
+export interface ColecaoAssocBanco {
+  colecao: {
+    idColecao: string;
+    nome: string;
+  };
+}
+
+export interface AmbienteBanco {
   idAmbienteSonoro: string;
   idUsuario?: string;
   nome: string;
@@ -63,9 +70,10 @@ interface AmbienteBanco {
   licencaImagem: string | null;
   dataCriacao: Date;
   audios: ItemComposicaoBanco[];
+  colecoes?: ColecaoAssocBanco[];
 }
 
-function dtoComposicaoAudio(item: ItemComposicaoBanco) {
+export function dtoComposicaoAudio(item: ItemComposicaoBanco) {
   const metadadosPublicosAudio = {
     idAudio: item.audio.idAudio,
     descricao: item.audio.descricao,
@@ -91,7 +99,7 @@ function dtoComposicaoAudio(item: ItemComposicaoBanco) {
   };
 }
 
-function dtoAmbiente(ambiente: AmbienteBanco) {
+export function dtoAmbiente(ambiente: AmbienteBanco) {
   return {
     idAmbienteSonoro: ambiente.idAmbienteSonoro,
     nome: ambiente.nome,
@@ -106,6 +114,14 @@ function dtoAmbiente(ambiente: AmbienteBanco) {
     licencaImagem: ambiente.licencaImagem,
     dataCriacao: ambiente.dataCriacao,
     audios: ambiente.audios.map(dtoComposicaoAudio),
+    ...(ambiente.colecoes
+      ? {
+          colecoes: ambiente.colecoes.map((c) => ({
+            idColecao: c.colecao.idColecao,
+            nome: c.colecao.nome,
+          })),
+        }
+      : {}),
   };
 }
 
@@ -169,12 +185,23 @@ export async function criarAmbienteSonoro(idUsuario: string, dadosBrutos: unknow
   return dtoAmbiente(ambienteCriado);
 }
 
-export async function listarAmbientesSonoros(idUsuario: string) {
+export async function listarAmbientesSonoros(
+  idUsuario: string,
+  opcoes?: { semColecao?: boolean }
+) {
+  const where: Prisma.AmbienteSonoroWhereInput = {
+    idUsuario,
+    origem: ORIGEM_PERSONALIZADO,
+  };
+
+  if (opcoes?.semColecao === true) {
+    where.colecoes = {
+      none: {},
+    };
+  }
+
   const ambientes = await prisma.ambienteSonoro.findMany({
-    where: {
-      idUsuario,
-      origem: ORIGEM_PERSONALIZADO,
-    },
+    where,
     include: {
       audios: {
         include: {
@@ -182,6 +209,16 @@ export async function listarAmbientesSonoros(idUsuario: string) {
         },
         orderBy: {
           audio: { titulo: "asc" },
+        },
+      },
+      colecoes: {
+        include: {
+          colecao: {
+            select: {
+              idColecao: true,
+              nome: true,
+            },
+          },
         },
       },
     },
@@ -207,6 +244,16 @@ export async function obterAmbienteSonoro(idUsuario: string, idAmbienteSonoro: s
         },
         orderBy: {
           audio: { titulo: "asc" },
+        },
+      },
+      colecoes: {
+        include: {
+          colecao: {
+            select: {
+              idColecao: true,
+              nome: true,
+            },
+          },
         },
       },
     },

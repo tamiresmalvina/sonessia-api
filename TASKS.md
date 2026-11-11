@@ -96,15 +96,15 @@
 
 **Prioridade:** Should Have
 
-- [ ] Definir/modelar coleções pertencentes a um usuário.
-- [ ] Permitir criar coleção com nome.
-- [ ] Permitir adicionar ambientes salvos a uma coleção.
-- [ ] Implementar consulta de uma coleção com seus ambientes associados.
-- [ ] Permitir remover um ambiente da coleção sem excluir o ambiente salvo.
-- [ ] Disponibilizar listagem geral dos ambientes salvos, inclusive os que não pertencem a coleção.
-- [ ] Permitir acessar individualmente os ambientes associados a uma coleção.
-- [ ] Garantir isolamento das coleções e ambientes por usuário.
-- [ ] Testar criação, associação, remoção da coleção sem exclusão e ambientes sem coleção.
+- [x] Definir/modelar coleções pertencentes a um usuário.
+- [x] Permitir criar coleção com nome.
+- [x] Permitir adicionar ambientes salvos a uma coleção.
+- [x] Implementar consulta de uma coleção com seus ambientes associados.
+- [x] Permitir remover um ambiente da coleção sem excluir o ambiente salvo.
+- [x] Disponibilizar listagem geral dos ambientes salvos, inclusive os que não pertencem a coleção.
+- [x] Permitir acessar individualmente os ambientes associados a uma coleção.
+- [x] Garantir isolamento das coleções e ambientes por usuário.
+- [x] Testar criação, associação, remoção da coleção sem exclusão e ambientes sem coleção.
 
 ## US07 — Configurar temporizador e pausas entre sessões
 

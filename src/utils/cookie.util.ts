@@ -3,18 +3,27 @@ import { ambiente } from "../config/ambiente.js";
 
 export const NOME_COOKIE_REFRESH = "refreshToken";
 
-export function obterOpcoesCookieRefresh(): CookieOptions {
-  return {
+export function obterOpcoesCookieRefresh(persistente = true): CookieOptions {
+  const opcoes: CookieOptions = {
     httpOnly: true,
     secure: ambiente.NODE_ENV === "production",
     sameSite: "lax",
     path: "/autenticacao",
-    maxAge: ambiente.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000,
   };
+
+  if (persistente) {
+    opcoes.maxAge = ambiente.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000;
+  }
+
+  return opcoes;
 }
 
-export function definirCookieRefresh(res: Response, refreshToken: string): void {
-  res.cookie(NOME_COOKIE_REFRESH, refreshToken, obterOpcoesCookieRefresh());
+export function definirCookieRefresh(
+  res: Response,
+  refreshToken: string,
+  persistente = true
+): void {
+  res.cookie(NOME_COOKIE_REFRESH, refreshToken, obterOpcoesCookieRefresh(persistente));
 }
 
 export function limparCookieRefresh(res: Response): void {

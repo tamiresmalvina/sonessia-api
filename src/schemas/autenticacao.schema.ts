@@ -161,6 +161,7 @@ export const schemaLogin = z.object({
     .string()
     .min(1, "A senha é obrigatória.")
     .max(128, "A senha deve ter no máximo 128 caracteres."),
+  lembrarMe: z.boolean().optional(),
 });
 
 export type EntradaLogin = z.infer<typeof schemaLogin>;

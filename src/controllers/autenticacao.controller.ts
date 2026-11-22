@@ -61,7 +61,8 @@ export async function login(
     const resultado = await servicoAutenticacao.autenticarUsuario(req.body);
     idSessaoCriada = resultado.idSessao;
 
-    definirCookieRefresh(res, resultado.refreshToken);
+    const persistente = req.body?.lembrarMe !== undefined ? Boolean(req.body.lembrarMe) : true;
+    definirCookieRefresh(res, resultado.refreshToken, persistente);
 
     res.status(200).json({
       mensagem: "Login realizado com sucesso.",
@@ -100,8 +101,9 @@ export async function renovarSessao(
 
     const resultado = await servicoAutenticacao.renovarSessao(refreshToken.trim());
 
+    const persistente = req.body?.lembrarMe !== undefined ? Boolean(req.body.lembrarMe) : true;
     // Atualiza o cookie com o novo token de atualização gerado na rotação
-    definirCookieRefresh(res, resultado.novoRefreshToken);
+    definirCookieRefresh(res, resultado.novoRefreshToken, persistente);
 
     res.status(200).json({
       mensagem: "Sessão renovada com sucesso.",

@@ -110,6 +110,41 @@ describe("Fluxo de Login — POST /autenticacao/login", () => {
     expect(sessaoGravada!.tokenHash).toBe(hashEsperado);
   });
 
+  it("login com lembrarMe: true define cookie com Max-Age persistente", async () => {
+    const email = `${prefixoTeste}lembrar_sim_${Date.now()}@teste.com`;
+    const senha = "SenhaCorreta@123456";
+    await criarUsuarioTeste({ email, senha, emailVerificado: true });
+
+    const resposta = await request(app)
+      .post("/autenticacao/login")
+      .send({ email, senha, lembrarMe: true });
+
+    expect(resposta.status).toBe(200);
+    const cookiesResposta = resposta.headers["set-cookie"];
+    const listaCookies = Array.isArray(cookiesResposta) ? cookiesResposta : [cookiesResposta];
+    const cookieRefresh = listaCookies.find((c: string) => c.startsWith("refreshToken="));
+    expect(cookieRefresh).toBeDefined();
+    expect(cookieRefresh).toMatch(/Max-Age=\d+/i);
+  });
+
+  it("login com lembrarMe: false define cookie de sessão sem Max-Age", async () => {
+    const email = `${prefixoTeste}lembrar_nao_${Date.now()}@teste.com`;
+    const senha = "SenhaCorreta@123456";
+    await criarUsuarioTeste({ email, senha, emailVerificado: true });
+
+    const resposta = await request(app)
+      .post("/autenticacao/login")
+      .send({ email, senha, lembrarMe: false });
+
+    expect(resposta.status).toBe(200);
+    const cookiesResposta = resposta.headers["set-cookie"];
+    const listaCookies = Array.isArray(cookiesResposta) ? cookiesResposta : [cookiesResposta];
+    const cookieRefresh = listaCookies.find((c: string) => c.startsWith("refreshToken="));
+    expect(cookieRefresh).toBeDefined();
+    expect(cookieRefresh).not.toMatch(/Max-Age=/i);
+    expect(cookieRefresh).not.toMatch(/Expires=/i);
+  });
+
   it("token JWT de acesso emitido possui algoritmo HS256, claims esperadas (sub, iss, aud) e expiração válida", async () => {
     const email = `${prefixoTeste}jwt_${Date.now()}@teste.com`;
     const senha = "SenhaForte@123456";

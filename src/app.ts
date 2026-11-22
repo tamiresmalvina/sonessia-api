@@ -7,6 +7,7 @@ import { rotasAutenticacao } from "./routes/autenticacao.routes.js";
 import { rotasAudios } from "./routes/audios.routes.js";
 import { rotasAmbientesSonoros } from "./routes/ambientes-sonoros.routes.js";
 import { rotasColecoes } from "./routes/colecoes.routes.js";
+import { rotasCategorias } from "./routes/categorias.routes.js";
 
 const app = express();
 
@@ -42,6 +43,7 @@ app.use("/audios", rotasAudios);
 app.use("/ambientes-sonoros", rotasAmbientesSonoros);
 app.use("/ambientes", rotasAmbientesSonoros);
 app.use("/colecoes", rotasColecoes);
+app.use("/categorias", rotasCategorias);
 
 app.use((_req, res) => {
   res.status(404).json({

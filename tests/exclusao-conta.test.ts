@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { prisma } from "../lib/prisma.js";
-import { CategoriaAudio, Finalidade, Perfil, StatusSessao } from "../generated/prisma/enums.js";
+import { Finalidade, Perfil, StatusSessao } from "../generated/prisma/enums.js";
 import { app } from "../src/app.js";
 import {
   cloudinary,
@@ -165,11 +165,17 @@ describe("Exclusão e reativação de conta", () => {
   }
 
   async function criarAudio(idUsuario: string, titulo: string) {
+    let cat = await prisma.categoria.findFirst({ where: { tipo: "AUDIO" } });
+    if (!cat) {
+      cat = await prisma.categoria.create({
+        data: { nome: "Natureza", tipo: "AUDIO", ativa: true },
+      });
+    }
     return prisma.audio.create({
       data: {
         idUsuario,
+        idCategoria: cat.idCategoria,
         descricao: null,
-        categoria: CategoriaAudio.NATUREZA,
         arquivo: "referencia-nao-gerenciada-pelo-projeto",
         titulo,
         tituloOriginal: titulo,

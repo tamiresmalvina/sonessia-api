@@ -1,7 +1,8 @@
 import { prisma } from "../../lib/prisma.js";
 import type { Prisma } from "../../generated/prisma/client.js";
-import { Finalidade, type CategoriaAudio } from "../../generated/prisma/enums.js";
+import { Finalidade } from "../../generated/prisma/enums.js";
 import { AppError } from "../errors/app.error.js";
+import { exigirCategoriaAtiva } from "./categoria.service.js";
 import {
   schemaCriarAmbienteSonoro,
   schemaAtualizarAmbienteSonoro,
@@ -30,8 +31,12 @@ function validarId(id: string, campo = "ambiente"): void {
 
 interface AudioBanco {
   idAudio: string;
+  idCategoria?: string;
   descricao: string | null;
-  categoria: CategoriaAudio;
+  categoria?: {
+    idCategoria?: string;
+    nome: string;
+  } | string | null;
   arquivo: string;
   arquivoPublicId?: string | null;
   titulo: string;
@@ -58,6 +63,11 @@ export interface ColecaoAssocBanco {
 export interface AmbienteBanco {
   idAmbienteSonoro: string;
   idUsuario?: string;
+  idCategoria?: string | null;
+  categoria?: {
+    idCategoria: string;
+    nome: string;
+  } | null;
   nome: string;
   descricao: string | null;
   finalidade: Finalidade;
@@ -74,10 +84,16 @@ export interface AmbienteBanco {
 }
 
 export function dtoComposicaoAudio(item: ItemComposicaoBanco) {
+  const nomeCategoria =
+    typeof item.audio.categoria === "object" && item.audio.categoria !== null
+      ? item.audio.categoria.nome
+      : (typeof item.audio.categoria === "string" ? item.audio.categoria : "");
+
   const metadadosPublicosAudio = {
     idAudio: item.audio.idAudio,
+    idCategoria: item.audio.idCategoria,
     descricao: item.audio.descricao,
-    categoria: item.audio.categoria,
+    categoria: nomeCategoria,
     arquivo: item.audio.arquivo,
     titulo: item.audio.titulo,
     tituloOriginal: item.audio.tituloOriginal,
@@ -90,7 +106,7 @@ export function dtoComposicaoAudio(item: ItemComposicaoBanco) {
     volume: item.volume,
     titulo: item.audio.titulo,
     tituloOriginal: item.audio.tituloOriginal,
-    categoria: item.audio.categoria,
+    categoria: nomeCategoria,
     arquivo: item.audio.arquivo,
     descricao: item.audio.descricao,
     fonte: item.audio.fonte,
@@ -102,6 +118,8 @@ export function dtoComposicaoAudio(item: ItemComposicaoBanco) {
 export function dtoAmbiente(ambiente: AmbienteBanco) {
   return {
     idAmbienteSonoro: ambiente.idAmbienteSonoro,
+    idCategoria: ambiente.idCategoria ?? null,
+    categoria: ambiente.categoria?.nome ?? null,
     nome: ambiente.nome,
     descricao: ambiente.descricao,
     finalidade: ambiente.finalidade,
@@ -143,6 +161,7 @@ async function verificarAudiosExistentes(itens: ItemComposicaoAudio[]): Promise<
 
 export async function criarAmbienteSonoro(idUsuario: string, dadosBrutos: unknown) {
   const dados: EntradaCriarAmbienteSonoro = schemaCriarAmbienteSonoro.parse(dadosBrutos);
+  if (dados.idCategoria) await exigirCategoriaAtiva(dados.idCategoria, "AMBIENTE");
   await verificarAudiosExistentes(dados.audios);
 
   const ambienteCriado = await prisma.$transaction(async (tx) => {
@@ -153,6 +172,7 @@ export async function criarAmbienteSonoro(idUsuario: string, dadosBrutos: unknow
         descricao: dados.descricao ?? null,
         finalidade: dados.finalidade,
         origem: ORIGEM_PERSONALIZADO,
+        idCategoria: dados.idCategoria ?? null,
         publicado: false,
       },
     });
@@ -168,9 +188,14 @@ export async function criarAmbienteSonoro(idUsuario: string, dadosBrutos: unknow
     const resultado = await tx.ambienteSonoro.findUniqueOrThrow({
       where: { idAmbienteSonoro: ambiente.idAmbienteSonoro },
       include: {
+        categoria: true,
         audios: {
           include: {
-            audio: true,
+            audio: {
+              include: {
+                categoria: true,
+              },
+            },
           },
           orderBy: {
             audio: { titulo: "asc" },
@@ -203,9 +228,14 @@ export async function listarAmbientesSonoros(
   const ambientes = await prisma.ambienteSonoro.findMany({
     where,
     include: {
+      categoria: true,
       audios: {
         include: {
-          audio: true,
+          audio: {
+            include: {
+              categoria: true,
+            },
+          },
         },
         orderBy: {
           audio: { titulo: "asc" },
@@ -238,9 +268,14 @@ export async function obterAmbienteSonoro(idUsuario: string, idAmbienteSonoro: s
       origem: ORIGEM_PERSONALIZADO,
     },
     include: {
+      categoria: true,
       audios: {
         include: {
-          audio: true,
+          audio: {
+            include: {
+              categoria: true,
+            },
+          },
         },
         orderBy: {
           audio: { titulo: "asc" },
@@ -290,11 +325,15 @@ export async function atualizarAmbienteSonoro(
   if (dados.audios !== undefined) {
     await verificarAudiosExistentes(dados.audios);
   }
+  if (dados.idCategoria) await exigirCategoriaAtiva(dados.idCategoria, "AMBIENTE");
 
   const ambienteAtualizado = await prisma.$transaction(async (tx) => {
     const alteracao: Prisma.AmbienteSonoroUpdateInput = {};
     if (dados.nome !== undefined) alteracao.nome = dados.nome;
     if (dados.descricao !== undefined) alteracao.descricao = dados.descricao;
+    if (dados.idCategoria !== undefined) {
+      alteracao.categoria = dados.idCategoria ? { connect: { idCategoria: dados.idCategoria } } : { disconnect: true };
+    }
     if (dados.finalidade !== undefined) alteracao.finalidade = dados.finalidade;
 
     if (Object.keys(alteracao).length > 0) {
@@ -321,9 +360,14 @@ export async function atualizarAmbienteSonoro(
     const resultado = await tx.ambienteSonoro.findUniqueOrThrow({
       where: { idAmbienteSonoro },
       include: {
+        categoria: true,
         audios: {
           include: {
-            audio: true,
+            audio: {
+              include: {
+                categoria: true,
+              },
+            },
           },
           orderBy: {
             audio: { titulo: "asc" },
@@ -373,6 +417,7 @@ export async function excluirAmbienteSonoro(idUsuario: string, idAmbienteSonoro:
 
 export async function criarAmbientePreConfigurado(idAdmin: string, dadosBrutos: unknown) {
   const dados: EntradaCriarAmbientePreConfigurado = schemaCriarAmbientePreConfigurado.parse(dadosBrutos);
+  if (dados.idCategoria) await exigirCategoriaAtiva(dados.idCategoria, "AMBIENTE");
   await verificarAudiosExistentes(dados.audios);
 
   const ambienteCriado = await prisma.$transaction(async (tx) => {
@@ -383,6 +428,7 @@ export async function criarAmbientePreConfigurado(idAdmin: string, dadosBrutos: 
         descricao: dados.descricao ?? null,
         finalidade: dados.finalidade,
         origem: ORIGEM_PRECONFIGURADO,
+        idCategoria: dados.idCategoria ?? null,
         publicado: dados.publicado ?? false,
         imagem: dados.imagem ?? null,
         autorImagem: dados.autorImagem ?? null,
@@ -403,9 +449,14 @@ export async function criarAmbientePreConfigurado(idAdmin: string, dadosBrutos: 
     const resultado = await tx.ambienteSonoro.findUniqueOrThrow({
       where: { idAmbienteSonoro: ambiente.idAmbienteSonoro },
       include: {
+        categoria: true,
         audios: {
           include: {
-            audio: true,
+            audio: {
+              include: {
+                categoria: true,
+              },
+            },
           },
           orderBy: {
             audio: { titulo: "asc" },
@@ -438,9 +489,14 @@ export async function listarAmbientesPreConfigurados(filtros?: {
   const ambientes = await prisma.ambienteSonoro.findMany({
     where,
     include: {
+      categoria: true,
       audios: {
         include: {
-          audio: true,
+          audio: {
+            include: {
+              categoria: true,
+            },
+          },
         },
         orderBy: {
           audio: { titulo: "asc" },
@@ -462,9 +518,14 @@ export async function obterAmbientePreConfigurado(idAmbienteSonoro: string) {
       origem: ORIGEM_PRECONFIGURADO,
     },
     include: {
+      categoria: true,
       audios: {
         include: {
-          audio: true,
+          audio: {
+            include: {
+              categoria: true,
+            },
+          },
         },
         orderBy: {
           audio: { titulo: "asc" },
@@ -502,11 +563,15 @@ export async function atualizarAmbientePreConfigurado(
   if (dados.audios !== undefined) {
     await verificarAudiosExistentes(dados.audios);
   }
+  if (dados.idCategoria) await exigirCategoriaAtiva(dados.idCategoria, "AMBIENTE");
 
   const ambienteAtualizado = await prisma.$transaction(async (tx) => {
     const alteracao: Prisma.AmbienteSonoroUpdateInput = {};
     if (dados.nome !== undefined) alteracao.nome = dados.nome;
     if (dados.descricao !== undefined) alteracao.descricao = dados.descricao;
+    if (dados.idCategoria !== undefined) {
+      alteracao.categoria = dados.idCategoria ? { connect: { idCategoria: dados.idCategoria } } : { disconnect: true };
+    }
     if (dados.finalidade !== undefined) alteracao.finalidade = dados.finalidade;
     if (dados.publicado !== undefined) alteracao.publicado = dados.publicado;
     if (dados.imagem !== undefined) alteracao.imagem = dados.imagem;
@@ -539,9 +604,14 @@ export async function atualizarAmbientePreConfigurado(
     const resultado = await tx.ambienteSonoro.findUniqueOrThrow({
       where: { idAmbienteSonoro },
       include: {
+        categoria: true,
         audios: {
           include: {
-            audio: true,
+            audio: {
+              include: {
+                categoria: true,
+              },
+            },
           },
           orderBy: {
             audio: { titulo: "asc" },
@@ -578,9 +648,14 @@ export async function alterarPublicacaoAmbientePreConfigurado(
     where: { idAmbienteSonoro },
     data: { publicado },
     include: {
+      categoria: true,
       audios: {
         include: {
-          audio: true,
+          audio: {
+            include: {
+              categoria: true,
+            },
+          },
         },
         orderBy: {
           audio: { titulo: "asc" },
@@ -637,9 +712,14 @@ export async function listarAmbientesPublicos(filtroFinalidade?: Finalidade) {
   const ambientes = await prisma.ambienteSonoro.findMany({
     where,
     include: {
+      categoria: true,
       audios: {
         include: {
-          audio: true,
+          audio: {
+            include: {
+              categoria: true,
+            },
+          },
         },
         orderBy: {
           audio: { titulo: "asc" },
@@ -662,9 +742,14 @@ export async function obterAmbientePublico(idAmbienteSonoro: string) {
       publicado: true,
     },
     include: {
+      categoria: true,
       audios: {
         include: {
-          audio: true,
+          audio: {
+            include: {
+              categoria: true,
+            },
+          },
         },
         orderBy: {
           audio: { titulo: "asc" },

@@ -82,12 +82,18 @@ describe("CRUD administrativo de áudios", () => {
     }));
   }
 
-  function enviarCriacao(tokenAcesso: string) {
+  async function enviarCriacao(tokenAcesso: string) {
+    let cat = await prisma.categoria.findFirst({ where: { tipo: "AUDIO" } });
+    if (!cat) {
+      cat = await prisma.categoria.create({
+        data: { nome: "Natureza", tipo: "AUDIO", ativa: true },
+      });
+    }
     return request(app)
       .post("/audios")
       .set("Authorization", `Bearer ${tokenAcesso}`)
       .field("metadados", JSON.stringify({
-        categoria: "NATUREZA",
+        idCategoria: cat.idCategoria,
         titulo: "Chuva da tarde",
         tituloOriginal: "Afternoon rain",
         fonte: "Domínio público",
@@ -173,7 +179,7 @@ describe("CRUD administrativo de áudios", () => {
       idAudio,
       titulo: "Chuva da tarde",
       tituloOriginal: "Afternoon rain",
-      categoria: "NATUREZA",
+      categoria: "Natureza",
       fonte: "Domínio público",
       licenca: "CC0",
     });

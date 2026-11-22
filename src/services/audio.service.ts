@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "../../lib/prisma.js";
 import type { Prisma } from "../../generated/prisma/client.js";
-import { CategoriaAudio } from "../../generated/prisma/enums.js";
 import { obterInstanciaCloudinary } from "../config/cloudinary.js";
 import { AppError } from "../errors/app.error.js";
+import { exigirCategoriaAtiva } from "./categoria.service.js";
 import { schemaCriarAudio, schemaAtualizarAudio, type EntradaAtualizarAudio } from "../schemas/audio.schema.js";
 import { TAMANHO_MAXIMO_AUDIO, type ArquivoAudioRecebido } from "../middlewares/audio.middleware.js";
 
@@ -63,22 +63,69 @@ function ehRegistro(valor: unknown): valor is Record<string, unknown> {
   return typeof valor === "object" && valor !== null;
 }
 
+async function resolverCategoriaAudio(idCategoria?: string, nomeOuCodigo?: string): Promise<string> {
+  if (idCategoria) {
+    return exigirCategoriaAtiva(idCategoria, "AUDIO");
+  }
+
+  if (nomeOuCodigo) {
+    if (UUID.test(nomeOuCodigo)) {
+      return exigirCategoriaAtiva(nomeOuCodigo, "AUDIO");
+    }
+
+    const mapaNomes: Record<string, string> = {
+      NATUREZA: "Natureza",
+      AMBIENTE: "Ambiente",
+      INSTRUMENTAL: "Instrumental",
+      RUIDO: "Ruído",
+      RUIDOS: "Ruído",
+    };
+    const nomeBuscado = mapaNomes[nomeOuCodigo.toUpperCase()] || nomeOuCodigo;
+
+    const cat = await prisma.categoria.findFirst({
+      where: {
+        tipo: "AUDIO",
+        nome: { equals: nomeBuscado, mode: "insensitive" },
+      },
+    });
+
+    if (!cat) {
+      throw new AppError(400, "CATEGORIA_INVALIDA", `Categoria '${nomeOuCodigo}' não encontrada para áudios.`);
+    }
+    if (!cat.ativa) {
+      throw new AppError(409, "CATEGORIA_INATIVA", "Uma categoria inativa não pode ser utilizada em novos áudios.");
+    }
+    return cat.idCategoria;
+  }
+
+  throw new AppError(400, "CATEGORIA_OBRIGATORIA", "A categoria é obrigatória.");
+}
+
 function dtoAudio(audio: {
   idAudio: string;
-  idUsuario: string;
+  idUsuario?: string;
+  idCategoria?: string;
   descricao: string | null;
-  categoria: CategoriaAudio;
+  categoria?: {
+    idCategoria?: string;
+    nome: string;
+  } | string | null;
   arquivo: string;
-  arquivoPublicId: string | null;
+  arquivoPublicId?: string | null;
   titulo: string;
   tituloOriginal: string;
   fonte: string;
   licenca: string;
 }) {
+  const nomeCategoria =
+    typeof audio.categoria === "object" && audio.categoria !== null
+      ? audio.categoria.nome
+      : (typeof audio.categoria === "string" ? audio.categoria : "");
+
   return {
     idAudio: audio.idAudio,
     descricao: audio.descricao,
-    categoria: audio.categoria,
+    categoria: nomeCategoria,
     arquivo: audio.arquivo,
     titulo: audio.titulo,
     tituloOriginal: audio.tituloOriginal,
@@ -89,7 +136,10 @@ function dtoAudio(audio: {
 
 async function obterAudioExistente(idAudio: string) {
   validarId(idAudio);
-  const audio = await prisma.audio.findUnique({ where: { idAudio } });
+  const audio = await prisma.audio.findUnique({
+    where: { idAudio },
+    include: { categoria: true },
+  });
   if (!audio) {
     throw new AppError(404, "AUDIO_NAO_ENCONTRADO", "Áudio não encontrado.");
   }
@@ -169,13 +219,14 @@ export async function criarAudio(
   arquivoDesconhecido?: ArquivoAudioRecebido
 ) {
   const metadados = schemaCriarAudio.parse(metadadosDesconhecidos);
+  const idCategoria = await resolverCategoriaAudio(metadados.idCategoria, metadados.categoria);
   const arquivo = validarArquivo(arquivoDesconhecido);
   const remoto = await enviarCloudinary(arquivo);
   try {
     const audio = await prisma.audio.create({
       data: {
         descricao: metadados.descricao ?? null,
-        categoria: metadados.categoria,
+        idCategoria,
         titulo: metadados.titulo,
         tituloOriginal: metadados.tituloOriginal,
         fonte: metadados.fonte,
@@ -183,6 +234,9 @@ export async function criarAudio(
         arquivo: remoto.arquivo,
         arquivoPublicId: remoto.publicId,
         idUsuario,
+      },
+      include: {
+        categoria: true,
       },
     });
     return dtoAudio(audio);
@@ -193,7 +247,10 @@ export async function criarAudio(
 }
 
 export async function listarAudios() {
-  const audios = await prisma.audio.findMany({ orderBy: { titulo: "asc" } });
+  const audios = await prisma.audio.findMany({
+    include: { categoria: true },
+    orderBy: { titulo: "asc" },
+  });
   return audios.map(dtoAudio);
 }
 
@@ -206,7 +263,9 @@ export async function atualizarAudio(idAudio: string, dados: unknown) {
   const entrada: EntradaAtualizarAudio = schemaAtualizarAudio.parse(dados);
   const alteracao: Prisma.AudioUncheckedUpdateInput = {};
   if (entrada.descricao !== undefined) alteracao.descricao = entrada.descricao;
-  if (entrada.categoria !== undefined) alteracao.categoria = entrada.categoria;
+  if (entrada.idCategoria !== undefined || entrada.categoria !== undefined) {
+    alteracao.idCategoria = await resolverCategoriaAudio(entrada.idCategoria, entrada.categoria);
+  }
   if (entrada.titulo !== undefined) alteracao.titulo = entrada.titulo;
   if (entrada.tituloOriginal !== undefined) alteracao.tituloOriginal = entrada.tituloOriginal;
   if (entrada.fonte !== undefined) alteracao.fonte = entrada.fonte;
@@ -214,6 +273,9 @@ export async function atualizarAudio(idAudio: string, dados: unknown) {
   const audio = await prisma.audio.update({
     where: { idAudio },
     data: alteracao,
+    include: {
+      categoria: true,
+    },
   });
   return dtoAudio(audio);
 }
@@ -227,6 +289,9 @@ export async function substituirArquivoAudio(idAudio: string, arquivoDesconhecid
     audio = await prisma.audio.update({
       where: { idAudio },
       data: { arquivo: novo.arquivo, arquivoPublicId: novo.publicId },
+      include: {
+        categoria: true,
+      },
     });
   } catch (erro) {
     await compensarUpload(novo.publicId);

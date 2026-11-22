@@ -28,6 +28,12 @@ export const schemaCriarAmbienteSonoro = z
   .object({
     nome: textoObrigatorio("O nome", 255),
     descricao: textoObrigatorio("A descrição", 1000).optional().nullable(),
+    idCategoria: z
+      .string()
+      .trim()
+      .regex(UUID_REGEX, "O identificador da categoria é inválido.")
+      .optional()
+      .nullable(),
     finalidade: z.nativeEnum(Finalidade),
     audios: z
       .array(itemComposicaoAudioSchema)
@@ -50,6 +56,12 @@ export const schemaAtualizarAmbienteSonoro = z
       .union([textoObrigatorio("A descrição", 1000), z.null()])
       .optional(),
     finalidade: z.nativeEnum(Finalidade).optional(),
+    idCategoria: z
+      .union([
+        z.string().trim().regex(UUID_REGEX, "O identificador da categoria é inválido."),
+        z.null(),
+      ])
+      .optional(),
     audios: z
       .array(itemComposicaoAudioSchema)
       .min(1, "O ambiente deve conter ao menos um áudio.")
@@ -72,6 +84,12 @@ export const schemaCriarAmbientePreConfigurado = z
   .object({
     nome: textoObrigatorio("O nome", 255),
     descricao: textoObrigatorio("A descrição", 1000).optional().nullable(),
+    idCategoria: z
+      .string()
+      .trim()
+      .regex(UUID_REGEX, "O identificador da categoria é inválido.")
+      .optional()
+      .nullable(),
     finalidade: z.nativeEnum(Finalidade),
     publicado: z.boolean().optional().default(false),
     imagem: textoObrigatorio("A imagem", 2048).optional().nullable(),
@@ -100,6 +118,12 @@ export const schemaAtualizarAmbientePreConfigurado = z
       .union([textoObrigatorio("A descrição", 1000), z.null()])
       .optional(),
     finalidade: z.nativeEnum(Finalidade).optional(),
+    idCategoria: z
+      .union([
+        z.string().trim().regex(UUID_REGEX, "O identificador da categoria é inválido."),
+        z.null(),
+      ])
+      .optional(),
     publicado: z.boolean().optional(),
     imagem: z.union([textoObrigatorio("A imagem", 2048), z.null()]).optional(),
     autorImagem: z.union([textoObrigatorio("O autor da imagem", 255), z.null()]).optional(),
@@ -135,6 +159,12 @@ export const schemaPublicacaoAmbiente = z
 export const schemaFiltroAmbientesPublicos = z
   .object({
     finalidade: z.nativeEnum(Finalidade).optional(),
+    idCategoria: z
+      .union([
+        z.string().trim().regex(UUID_REGEX, "O identificador da categoria é inválido."),
+        z.null(),
+      ])
+      .optional(),
   })
   .strict();
 

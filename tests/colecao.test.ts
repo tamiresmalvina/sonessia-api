@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { app } from "../src/app.js";
 import { prisma } from "../lib/prisma.js";
-import { CategoriaAudio, Finalidade, Perfil } from "../generated/prisma/enums.js";
+import { Finalidade, Perfil } from "../generated/prisma/enums.js";
 import { emitirTokenAcesso } from "../src/utils/jwt.util.js";
 import { garantirBancoTestesIsolado } from "./helpers/isolamento-banco.helper.js";
 
@@ -91,12 +91,18 @@ describe("Gerenciamento de Coleções Sonoras (US06)", () => {
   }
 
   async function criarAudio(idUsuario: string, titulo: string) {
+    let cat = await prisma.categoria.findFirst({ where: { tipo: "AUDIO" } });
+    if (!cat) {
+      cat = await prisma.categoria.create({
+        data: { nome: "Natureza", tipo: "AUDIO", ativa: true },
+      });
+    }
     return prisma.audio.create({
       data: {
         idUsuario,
+        idCategoria: cat.idCategoria,
         titulo,
         tituloOriginal: `${titulo} Original`,
-        categoria: CategoriaAudio.NATUREZA,
         descricao: `Descrição de ${titulo}`,
         arquivo: `https://res.cloudinary.com/cloud-falso/video/upload/sonessia/audios/${randomUUID()}.mp3`,
         arquivoPublicId: `sonessia/audios/${randomUUID()}`,

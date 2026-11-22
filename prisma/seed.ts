@@ -17,6 +17,26 @@ async function main(): Promise<void> {
     );
   }
 
+  const categoriasAudio = ["Natureza", "Ambiente", "Instrumental", "Ruído"];
+  for (const nome of categoriasAudio) {
+    await prisma.categoria.upsert({
+      where: { nome_tipo: { nome, tipo: "AUDIO" } },
+      update: {},
+      create: { nome, tipo: "AUDIO", ativa: true },
+    });
+  }
+
+  const categoriasAmbiente = ["Foco", "Sono", "Relaxamento", "Mascaramento"];
+  for (const nome of categoriasAmbiente) {
+    await prisma.categoria.upsert({
+      where: { nome_tipo: { nome, tipo: "AMBIENTE" } },
+      update: {},
+      create: { nome, tipo: "AMBIENTE", ativa: true },
+    });
+  }
+
+  console.log("Categorias padrão de áudio e ambiente verificadas/criadas.");
+
   const emailUsuarioTeste = "usuario@teste.com";
 
   // Verifica se o usuário já existe para não sobrescrever dados ou senhas existentes

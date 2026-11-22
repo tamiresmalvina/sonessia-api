@@ -91,6 +91,8 @@ export async function garantirBancoTestesIsolado(): Promise<DiagnosticoBancoTest
     );
   }
 
+  await garantirCategoriasPadrao();
+
   return {
     bancoAtual: banco,
     usuarioAtual: usuario,
@@ -98,4 +100,24 @@ export async function garantirBancoTestesIsolado(): Promise<DiagnosticoBancoTest
     portaServidor: porta,
     comprovadamenteIsolado: true,
   };
+}
+
+export async function garantirCategoriasPadrao(): Promise<void> {
+  const categoriasAudio = ["Natureza", "Ambiente", "Instrumental", "Ruído"];
+  for (const nome of categoriasAudio) {
+    await prisma.categoria.upsert({
+      where: { nome_tipo: { nome, tipo: "AUDIO" } },
+      update: {},
+      create: { nome, tipo: "AUDIO", ativa: true },
+    });
+  }
+
+  const categoriasAmbiente = ["Foco", "Sono", "Relaxamento", "Mascaramento"];
+  for (const nome of categoriasAmbiente) {
+    await prisma.categoria.upsert({
+      where: { nome_tipo: { nome, tipo: "AMBIENTE" } },
+      update: {},
+      create: { nome, tipo: "AMBIENTE", ativa: true },
+    });
+  }
 }

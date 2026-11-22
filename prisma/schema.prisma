@@ -28,11 +28,24 @@ enum Finalidade {
   TRABALHO
 }
 
-enum CategoriaAudio {
-  NATUREZA
+enum TipoCategoria {
+  AUDIO
   AMBIENTE
-  INSTRUMENTAL
-  RUIDO
+}
+
+model Categoria {
+  idCategoria     String        @id @default(uuid()) @db.Uuid
+  nome            String
+  tipo            TipoCategoria
+  ativa           Boolean       @default(true)
+  dataCriacao     DateTime      @default(now())
+  dataAtualizacao DateTime      @updatedAt
+
+  audios           Audio[]
+  ambientesSonoros AmbienteSonoro[]
+
+  @@unique([nome, tipo])
+  @@index([tipo, ativa])
 }
 
 model Usuario {
@@ -139,6 +152,7 @@ model Colecao {
 model AmbienteSonoro {
   idAmbienteSonoro     String     @id @default(uuid()) @db.Uuid
   idUsuario            String     @db.Uuid
+  idCategoria          String?    @db.Uuid
   nome                 String
   descricao            String?
   finalidade           Finalidade
@@ -151,30 +165,35 @@ model AmbienteSonoro {
   dataCriacao          DateTime   @default(now())
   publicado            Boolean    @default(false)
 
-  usuario Usuario @relation(fields: [idUsuario], references: [id])
+  usuario   Usuario    @relation(fields: [idUsuario], references: [id])
+  categoria Categoria? @relation(fields: [idCategoria], references: [idCategoria], onDelete: Restrict)
 
   colecoes ColecaoAmbienteSonoro[]
   audios   AmbienteSonoroAudio[]
 
   @@index([origem, publicado])
   @@index([finalidade, publicado])
+  @@index([idCategoria])
 }
 
 model Audio {
-  idAudio        String         @id @default(uuid()) @db.Uuid
-  idUsuario      String         @db.Uuid
-  descricao      String?
-  categoria      CategoriaAudio
-  arquivo        String
+  idAudio         String   @id @default(uuid()) @db.Uuid
+  idUsuario       String   @db.Uuid
+  idCategoria     String   @db.Uuid
+  descricao       String?
+  arquivo         String
   arquivoPublicId String?
-  titulo         String
-  tituloOriginal String
-  fonte          String
-  licenca        String
+  titulo          String
+  tituloOriginal  String
+  fonte           String
+  licenca         String
 
-  usuario Usuario @relation(fields: [idUsuario], references: [id])
+  usuario   Usuario   @relation(fields: [idUsuario], references: [id])
+  categoria Categoria @relation(fields: [idCategoria], references: [idCategoria])
 
   ambientesSonoros AmbienteSonoroAudio[]
+
+  @@index([idCategoria])
 }
 
 model ColecaoAmbienteSonoro {

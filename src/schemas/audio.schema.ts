@@ -9,8 +9,17 @@ const textoObrigatorio = (campo: string, maximo: number) =>
     .min(1, `${campo} é obrigatório.`)
     .max(maximo, `${campo} deve ter no máximo ${maximo} caracteres.`);
 
+const identificadorIcone = z
+  .string()
+  .trim()
+  .min(1, "O identificador do ícone não pode ser vazio.")
+  .max(64, "O identificador do ícone deve ter no máximo 64 caracteres.")
+  .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/, "O identificador do ícone é inválido.")
+  .nullable();
+
 const metadadosBase = {
   descricao: textoObrigatorio("A descrição", 1000).optional(),
+  icone: identificadorIcone.optional(),
   idCategoria: z
     .string()
     .trim()
@@ -34,6 +43,7 @@ export const schemaCriarAudio = z
 export const schemaAtualizarAudio = z
   .object({
     descricao: z.union([textoObrigatorio("A descrição", 1000), z.null()]),
+    icone: metadadosBase.icone,
     idCategoria: metadadosBase.idCategoria,
     categoria: metadadosBase.categoria,
     titulo: metadadosBase.titulo.optional(),

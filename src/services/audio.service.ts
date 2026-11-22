@@ -106,6 +106,7 @@ function dtoAudio(audio: {
   idUsuario?: string;
   idCategoria?: string;
   descricao: string | null;
+  icone: string | null;
   categoria?: {
     idCategoria?: string;
     nome: string;
@@ -125,6 +126,7 @@ function dtoAudio(audio: {
   return {
     idAudio: audio.idAudio,
     descricao: audio.descricao,
+    icone: audio.icone,
     categoria: nomeCategoria,
     arquivo: audio.arquivo,
     titulo: audio.titulo,
@@ -226,6 +228,7 @@ export async function criarAudio(
     const audio = await prisma.audio.create({
       data: {
         descricao: metadados.descricao ?? null,
+        icone: metadados.icone ?? null,
         idCategoria,
         titulo: metadados.titulo,
         tituloOriginal: metadados.tituloOriginal,
@@ -263,6 +266,7 @@ export async function atualizarAudio(idAudio: string, dados: unknown) {
   const entrada: EntradaAtualizarAudio = schemaAtualizarAudio.parse(dados);
   const alteracao: Prisma.AudioUncheckedUpdateInput = {};
   if (entrada.descricao !== undefined) alteracao.descricao = entrada.descricao;
+  if (entrada.icone !== undefined) alteracao.icone = entrada.icone;
   if (entrada.idCategoria !== undefined || entrada.categoria !== undefined) {
     alteracao.idCategoria = await resolverCategoriaAudio(entrada.idCategoria, entrada.categoria);
   }

@@ -164,6 +164,7 @@ describe("CRUD administrativo de áudios", () => {
       "categoria",
       "descricao",
       "fonte",
+      "icone",
       "idAudio",
       "licenca",
       "titulo",
@@ -171,6 +172,7 @@ describe("CRUD administrativo de áudios", () => {
     ]);
     expect(listagem.body.audios[0]).not.toHaveProperty("arquivoPublicId");
     expect(listagem.body.audios[0]).not.toHaveProperty("idUsuario");
+    expect(listagem.body.audios[0].icone).toBeNull();
     expect(listagem.body.audios[0].arquivo).toMatch(/^https:\/\//);
 
     const consulta = await request(app).get(`/audios/${idAudio}`);
@@ -182,6 +184,7 @@ describe("CRUD administrativo de áudios", () => {
       categoria: "Natureza",
       fonte: "Domínio público",
       licenca: "CC0",
+      icone: null,
     });
     expect(consulta.body.audio).not.toHaveProperty("arquivoPublicId");
     expect(consulta.body.audio).not.toHaveProperty("idUsuario");
@@ -190,9 +193,30 @@ describe("CRUD administrativo de áudios", () => {
     const atualizacao = await request(app)
       .patch(`/audios/${idAudio}`)
       .set("Authorization", `Bearer ${token(admin)}`)
-      .send({ titulo: "Chuva noturna", descricao: "Som suave de chuva" });
+      .send({ titulo: "Chuva noturna", descricao: "Som suave de chuva", icone: "cloud-rain" });
     expect(atualizacao.status).toBe(200);
     expect(atualizacao.body.audio.titulo).toBe("Chuva noturna");
+    expect(atualizacao.body.audio).toMatchObject({
+      descricao: "Som suave de chuva",
+      icone: "cloud-rain",
+    });
+
+    const consultaAtualizada = await request(app).get(`/audios/${idAudio}`);
+    expect(consultaAtualizada.body.audio.icone).toBe("cloud-rain");
+    expect(consultaAtualizada.body.audio).toMatchObject({
+      titulo: "Chuva noturna",
+      tituloOriginal: "Afternoon rain",
+      categoria: "Natureza",
+      fonte: "Domínio público",
+      licenca: "CC0",
+    });
+
+    const limparIcone = await request(app)
+      .patch(`/audios/${idAudio}`)
+      .set("Authorization", `Bearer ${token(admin)}`)
+      .send({ icone: null });
+    expect(limparIcone.status).toBe(200);
+    expect(limparIcone.body.audio.icone).toBeNull();
 
     const substituicao = await request(app)
       .put(`/audios/${idAudio}/arquivo`)
@@ -227,6 +251,57 @@ describe("CRUD administrativo de áudios", () => {
       .attach("arquivo", arquivoMp3(), { filename: "som.mp3", contentType: "audio/mpeg" });
 
     expect(resposta.status).toBe(400);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("cadastra um áudio com identificador de ícone e o retorna nas consultas", async () => {
+    const admin = await criarUsuario(Perfil.ADMIN);
+    configurarUpload();
+    const resposta = await request(app)
+      .post("/audios")
+      .set("Authorization", `Bearer ${token(admin)}`)
+      .field("metadados", JSON.stringify({
+        categoria: "NATUREZA",
+        titulo: "Vento",
+        tituloOriginal: "Wind",
+        fonte: "Domínio público",
+        licenca: "CC0",
+        icone: "wind",
+      }))
+      .attach("arquivo", arquivoMp3(), { filename: "vento.mp3", contentType: "audio/mpeg" });
+
+    expect(resposta.status).toBe(201);
+    expect(resposta.body.audio.icone).toBe("wind");
+
+    const listagem = await request(app).get("/audios");
+    expect(listagem.body.audios).toContainEqual(expect.objectContaining({
+      idAudio: resposta.body.audio.idAudio,
+      icone: "wind",
+    }));
+    const consulta = await request(app).get(`/audios/${resposta.body.audio.idAudio}`);
+    expect(consulta.body.audio.icone).toBe("wind");
+  });
+
+  it("rejeita identificadores de ícone inválidos ou longos demais", async () => {
+    const admin = await criarUsuario(Perfil.ADMIN);
+    const upload = vi.spyOn(cloudinary.uploader, "upload");
+    const metadadosBase = {
+      categoria: "NATUREZA",
+      titulo: "Som",
+      tituloOriginal: "Sound",
+      fonte: "Teste",
+      licenca: "CC0",
+    };
+
+    for (const icone of ["Cloud Rain", "cloud--rain", "a".repeat(65)]) {
+      const resposta = await request(app)
+        .post("/audios")
+        .set("Authorization", `Bearer ${token(admin)}`)
+        .field("metadados", JSON.stringify({ ...metadadosBase, icone }))
+        .attach("arquivo", arquivoMp3(), { filename: "som.mp3", contentType: "audio/mpeg" });
+      expect(resposta.status).toBe(400);
+    }
+
     expect(upload).not.toHaveBeenCalled();
   });
 

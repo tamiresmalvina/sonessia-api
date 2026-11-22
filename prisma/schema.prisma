@@ -181,6 +181,7 @@ model Audio {
   idUsuario       String   @db.Uuid
   idCategoria     String   @db.Uuid
   descricao       String?
+  icone           String?
   arquivo         String
   arquivoPublicId String?
   titulo          String

@@ -1,8 +1,12 @@
 import { prisma } from "../../lib/prisma.js";
 import type { Prisma } from "../../generated/prisma/client.js";
 import { Finalidade } from "../../generated/prisma/enums.js";
+import { randomUUID } from "node:crypto";
 import { AppError } from "../errors/app.error.js";
 import { exigirCategoriaAtiva } from "./categoria.service.js";
+import { obterInstanciaCloudinary } from "../config/cloudinary.js";
+import { validarImagem } from "./foto-perfil.service.js";
+import type { ArquivoImagemAmbienteRecebido } from "../middlewares/ambiente-imagem.middleware.js";
 import {
   schemaCriarAmbienteSonoro,
   schemaAtualizarAmbienteSonoro,
@@ -74,6 +78,7 @@ export interface AmbienteBanco {
   origem: string;
   publicado: boolean;
   imagem: string | null;
+  imagemPublicId?: string | null;
   autorImagem: string | null;
   tituloOriginalImagem: string | null;
   fonteImagem: string | null;
@@ -415,58 +420,180 @@ export async function excluirAmbienteSonoro(idUsuario: string, idAmbienteSonoro:
 /* AMBIENTES PRÉ-CONFIGURADOS (US02 - Gestão Administrativa)                 */
 /* ========================================================================= */
 
-export async function criarAmbientePreConfigurado(idAdmin: string, dadosBrutos: unknown) {
+function composicaoNormalizada(audios: ItemComposicaoAudio[]): Array<[string, number]> {
+  return audios
+    .map((item) => [item.idAudio.toLowerCase(), item.volume] as [string, number])
+    .sort((a, b) => a[0].localeCompare(b[0]) || a[1] - b[1]);
+}
+
+function composicoesIguais(
+  primeira: ItemComposicaoBanco[] | ItemComposicaoAudio[],
+  segunda: ItemComposicaoBanco[] | ItemComposicaoAudio[],
+): boolean {
+  if (primeira.length !== segunda.length) return false;
+  const normalizadaPrimeira = composicaoNormalizada(
+    primeira.map((item) => ({ idAudio: item.idAudio, volume: item.volume })),
+  );
+  const normalizadaSegunda = composicaoNormalizada(
+    segunda.map((item) => ({ idAudio: item.idAudio, volume: item.volume })),
+  );
+  return JSON.stringify(normalizadaPrimeira) === JSON.stringify(normalizadaSegunda);
+}
+
+async function verificarAmbienteDuplicado(
+  nome: string,
+  audios: ItemComposicaoAudio[],
+  idIgnorado?: string,
+): Promise<void> {
+  const candidatos = await prisma.ambienteSonoro.findMany({
+    where: {
+      origem: ORIGEM_PRECONFIGURADO,
+      nome: nome,
+      ...(idIgnorado ? { idAmbienteSonoro: { not: idIgnorado } } : {}),
+    },
+    include: {
+      audios: true,
+    },
+  });
+
+  if (candidatos.some((ambiente) => composicoesIguais(ambiente.audios, audios))) {
+    throw new AppError(
+      409,
+      "AMBIENTE_PRE_CONFIGURADO_DUPLICADO",
+      "Já existe um ambiente pronto com este nome e esta composição de áudios e volumes.",
+    );
+  }
+}
+
+async function enviarImagemAmbiente(
+  arquivo: ArquivoImagemAmbienteRecebido,
+): Promise<{ imagem: string; imagemPublicId: string }> {
+  const tipoConteudo = validarImagem(arquivo.conteudo, arquivo.tipoConteudo);
+  const cloudinary = obterInstanciaCloudinary();
+  const publicId = `sonessia/ambientes/${randomUUID()}`;
+  try {
+    const resposta: unknown = await cloudinary.uploader.upload(
+      `data:${tipoConteudo};base64,${arquivo.conteudo.toString("base64")}`,
+      {
+        public_id: publicId,
+        resource_type: "image",
+        type: "upload",
+        allowed_formats: ["jpg", "png", "webp"],
+        overwrite: false,
+        unique_filename: false,
+        use_filename: false,
+        timeout: 15_000,
+      },
+    );
+    if (
+      typeof resposta !== "object" ||
+      resposta === null ||
+      !("secure_url" in resposta) ||
+      typeof resposta.secure_url !== "string" ||
+      !resposta.secure_url.startsWith("https://")
+    ) {
+      throw new AppError(502, "RESPOSTA_CLOUDINARY_INVALIDA", "O Cloudinary não confirmou uma imagem válida.");
+    }
+    return { imagem: resposta.secure_url, imagemPublicId: publicId };
+  } catch (erro) {
+    if (erro instanceof AppError) throw erro;
+    throw new AppError(502, "FALHA_CLOUDINARY", "Não foi possível armazenar a imagem do ambiente.");
+  }
+}
+
+async function removerImagemAmbiente(publicId: string): Promise<boolean> {
+  const cloudinary = obterInstanciaCloudinary();
+  try {
+    const resposta: unknown = await cloudinary.api.delete_resources([publicId], {
+      resource_type: "image",
+      type: "upload",
+      invalidate: true,
+      timeout: 15_000,
+    });
+    if (typeof resposta !== "object" || resposta === null || !("deleted" in resposta)) {
+      throw new AppError(502, "FALHA_REMOCAO_CLOUDINARY", "Não foi possível confirmar a remoção da imagem.");
+    }
+    const deleted = (resposta as { deleted: Record<string, unknown> }).deleted;
+    return deleted[publicId] === "deleted" || deleted[publicId] === "not_found";
+  } catch (erro) {
+    if (erro instanceof AppError) throw erro;
+    throw new AppError(502, "FALHA_REMOCAO_CLOUDINARY", "Não foi possível remover a imagem do ambiente.");
+  }
+}
+
+async function compensarImagemAmbiente(publicId: string): Promise<void> {
+  await removerImagemAmbiente(publicId).catch(() => undefined);
+}
+
+export async function criarAmbientePreConfigurado(
+  idAdmin: string,
+  dadosBrutos: unknown,
+  arquivoImagem?: ArquivoImagemAmbienteRecebido,
+) {
   const dados: EntradaCriarAmbientePreConfigurado = schemaCriarAmbientePreConfigurado.parse(dadosBrutos);
   if (dados.idCategoria) await exigirCategoriaAtiva(dados.idCategoria, "AMBIENTE");
   await verificarAudiosExistentes(dados.audios);
+  await verificarAmbienteDuplicado(dados.nome, dados.audios);
 
-  const ambienteCriado = await prisma.$transaction(async (tx) => {
-    const ambiente = await tx.ambienteSonoro.create({
-      data: {
-        idUsuario: idAdmin,
-        nome: dados.nome,
-        descricao: dados.descricao ?? null,
-        finalidade: dados.finalidade,
-        origem: ORIGEM_PRECONFIGURADO,
-        idCategoria: dados.idCategoria ?? null,
-        publicado: dados.publicado ?? false,
-        imagem: dados.imagem ?? null,
-        autorImagem: dados.autorImagem ?? null,
-        tituloOriginalImagem: dados.tituloOriginalImagem ?? null,
-        fonteImagem: dados.fonteImagem ?? null,
-        licencaImagem: dados.licencaImagem ?? null,
-      },
-    });
+  let imagemRemota: { imagem: string; imagemPublicId: string } | null = null;
+  if (arquivoImagem) {
+    imagemRemota = await enviarImagemAmbiente(arquivoImagem);
+  }
 
-    await tx.ambienteSonoroAudio.createMany({
-      data: dados.audios.map((item) => ({
-        idAmbienteSonoro: ambiente.idAmbienteSonoro,
-        idAudio: item.idAudio,
-        volume: item.volume,
-      })),
-    });
+  let ambienteCriado;
+  try {
+    ambienteCriado = await prisma.$transaction(async (tx) => {
+      const ambiente = await tx.ambienteSonoro.create({
+        data: {
+          idUsuario: idAdmin,
+          nome: dados.nome,
+          descricao: dados.descricao ?? null,
+          finalidade: dados.finalidade,
+          origem: ORIGEM_PRECONFIGURADO,
+          idCategoria: dados.idCategoria ?? null,
+          publicado: dados.publicado ?? false,
+          imagem: imagemRemota?.imagem ?? dados.imagem ?? null,
+          imagemPublicId: imagemRemota?.imagemPublicId ?? null,
+          autorImagem: dados.autorImagem ?? null,
+          tituloOriginalImagem: dados.tituloOriginalImagem ?? null,
+          fonteImagem: dados.fonteImagem ?? null,
+          licencaImagem: dados.licencaImagem ?? null,
+        },
+      });
 
-    const resultado = await tx.ambienteSonoro.findUniqueOrThrow({
-      where: { idAmbienteSonoro: ambiente.idAmbienteSonoro },
-      include: {
-        categoria: true,
-        audios: {
-          include: {
-            audio: {
-              include: {
-                categoria: true,
+      await tx.ambienteSonoroAudio.createMany({
+        data: dados.audios.map((item) => ({
+          idAmbienteSonoro: ambiente.idAmbienteSonoro,
+          idAudio: item.idAudio,
+          volume: item.volume,
+        })),
+      });
+
+      const resultado = await tx.ambienteSonoro.findUniqueOrThrow({
+        where: { idAmbienteSonoro: ambiente.idAmbienteSonoro },
+        include: {
+          categoria: true,
+          audios: {
+            include: {
+              audio: {
+                include: {
+                  categoria: true,
+                },
               },
             },
-          },
-          orderBy: {
-            audio: { titulo: "asc" },
+            orderBy: {
+              audio: { titulo: "asc" },
+            },
           },
         },
-      },
-    });
+      });
 
-    return resultado;
-  });
+      return resultado;
+    });
+  } catch (erro) {
+    if (imagemRemota) await compensarImagemAmbiente(imagemRemota.imagemPublicId);
+    throw erro;
+  }
 
   return dtoAmbiente(ambienteCriado);
 }
@@ -543,7 +670,8 @@ export async function obterAmbientePreConfigurado(idAmbienteSonoro: string) {
 
 export async function atualizarAmbientePreConfigurado(
   idAmbienteSonoro: string,
-  dadosBrutos: unknown
+  dadosBrutos: unknown,
+  arquivoImagem?: ArquivoImagemAmbienteRecebido,
 ) {
   validarId(idAmbienteSonoro);
   const dados: EntradaAtualizarAmbientePreConfigurado = schemaAtualizarAmbientePreConfigurado.parse(dadosBrutos);
@@ -553,7 +681,7 @@ export async function atualizarAmbientePreConfigurado(
       idAmbienteSonoro,
       origem: ORIGEM_PRECONFIGURADO,
     },
-    select: { idAmbienteSonoro: true },
+    include: { audios: true },
   });
 
   if (!ambienteExistente) {
@@ -565,63 +693,97 @@ export async function atualizarAmbientePreConfigurado(
   }
   if (dados.idCategoria) await exigirCategoriaAtiva(dados.idCategoria, "AMBIENTE");
 
-  const ambienteAtualizado = await prisma.$transaction(async (tx) => {
-    const alteracao: Prisma.AmbienteSonoroUpdateInput = {};
-    if (dados.nome !== undefined) alteracao.nome = dados.nome;
-    if (dados.descricao !== undefined) alteracao.descricao = dados.descricao;
-    if (dados.idCategoria !== undefined) {
-      alteracao.categoria = dados.idCategoria ? { connect: { idCategoria: dados.idCategoria } } : { disconnect: true };
-    }
-    if (dados.finalidade !== undefined) alteracao.finalidade = dados.finalidade;
-    if (dados.publicado !== undefined) alteracao.publicado = dados.publicado;
-    if (dados.imagem !== undefined) alteracao.imagem = dados.imagem;
-    if (dados.autorImagem !== undefined) alteracao.autorImagem = dados.autorImagem;
-    if (dados.tituloOriginalImagem !== undefined) alteracao.tituloOriginalImagem = dados.tituloOriginalImagem;
-    if (dados.fonteImagem !== undefined) alteracao.fonteImagem = dados.fonteImagem;
-    if (dados.licencaImagem !== undefined) alteracao.licencaImagem = dados.licencaImagem;
+  const nomeFinal = dados.nome ?? ambienteExistente.nome;
+  const audiosFinal = dados.audios ?? ambienteExistente.audios.map((item) => ({
+    idAudio: item.idAudio,
+    volume: item.volume,
+  }));
+  await verificarAmbienteDuplicado(nomeFinal, audiosFinal, idAmbienteSonoro);
 
-    if (Object.keys(alteracao).length > 0) {
-      await tx.ambienteSonoro.update({
+  let imagemRemota: { imagem: string; imagemPublicId: string } | null = null;
+  if (arquivoImagem) {
+    imagemRemota = await enviarImagemAmbiente(arquivoImagem);
+  }
+
+  let ambienteAtualizado;
+  try {
+    ambienteAtualizado = await prisma.$transaction(async (tx) => {
+      const alteracao: Prisma.AmbienteSonoroUpdateInput = {};
+      if (dados.nome !== undefined) alteracao.nome = dados.nome;
+      if (dados.descricao !== undefined) alteracao.descricao = dados.descricao;
+      if (dados.idCategoria !== undefined) {
+        alteracao.categoria = dados.idCategoria
+          ? { connect: { idCategoria: dados.idCategoria } }
+          : { disconnect: true };
+      }
+      if (dados.finalidade !== undefined) alteracao.finalidade = dados.finalidade;
+      if (dados.publicado !== undefined) alteracao.publicado = dados.publicado;
+      if (imagemRemota) {
+        alteracao.imagem = imagemRemota.imagem;
+        alteracao.imagemPublicId = imagemRemota.imagemPublicId;
+      } else if (dados.imagem !== undefined) {
+        alteracao.imagem = dados.imagem;
+        if (dados.imagem === null) alteracao.imagemPublicId = null;
+      }
+      if (dados.autorImagem !== undefined) alteracao.autorImagem = dados.autorImagem;
+      if (dados.tituloOriginalImagem !== undefined) alteracao.tituloOriginalImagem = dados.tituloOriginalImagem;
+      if (dados.fonteImagem !== undefined) alteracao.fonteImagem = dados.fonteImagem;
+      if (dados.licencaImagem !== undefined) alteracao.licencaImagem = dados.licencaImagem;
+
+      if (Object.keys(alteracao).length > 0) {
+        await tx.ambienteSonoro.update({
+          where: { idAmbienteSonoro },
+          data: alteracao,
+        });
+      }
+
+      if (dados.audios !== undefined) {
+        await tx.ambienteSonoroAudio.deleteMany({
+          where: { idAmbienteSonoro },
+        });
+        await tx.ambienteSonoroAudio.createMany({
+          data: dados.audios.map((item) => ({
+            idAmbienteSonoro,
+            idAudio: item.idAudio,
+            volume: item.volume,
+          })),
+        });
+      }
+
+      return tx.ambienteSonoro.findUniqueOrThrow({
         where: { idAmbienteSonoro },
-        data: alteracao,
-      });
-    }
-
-    if (dados.audios !== undefined) {
-      await tx.ambienteSonoroAudio.deleteMany({
-        where: { idAmbienteSonoro },
-      });
-
-      await tx.ambienteSonoroAudio.createMany({
-        data: dados.audios.map((item) => ({
-          idAmbienteSonoro,
-          idAudio: item.idAudio,
-          volume: item.volume,
-        })),
-      });
-    }
-
-    const resultado = await tx.ambienteSonoro.findUniqueOrThrow({
-      where: { idAmbienteSonoro },
-      include: {
-        categoria: true,
-        audios: {
-          include: {
-            audio: {
-              include: {
-                categoria: true,
+        include: {
+          categoria: true,
+          audios: {
+            include: {
+              audio: {
+                include: {
+                  categoria: true,
+                },
               },
             },
-          },
-          orderBy: {
-            audio: { titulo: "asc" },
+            orderBy: {
+              audio: { titulo: "asc" },
+            },
           },
         },
-      },
+      });
     });
+  } catch (erro) {
+    if (imagemRemota) await compensarImagemAmbiente(imagemRemota.imagemPublicId);
+    throw erro;
+  }
 
-    return resultado;
-  });
+  const publicIdAntigo = ambienteExistente.imagemPublicId;
+  if (
+    publicIdAntigo &&
+    (
+      (imagemRemota && publicIdAntigo !== imagemRemota.imagemPublicId) ||
+      dados.imagem === null
+    )
+  ) {
+    await removerImagemAmbiente(publicIdAntigo).catch(() => undefined);
+  }
 
   return dtoAmbiente(ambienteAtualizado);
 }
@@ -637,11 +799,22 @@ export async function alterarPublicacaoAmbientePreConfigurado(
       idAmbienteSonoro,
       origem: ORIGEM_PRECONFIGURADO,
     },
-    select: { idAmbienteSonoro: true },
+    include: { audios: true },
   });
 
   if (!ambienteExistente) {
     throw new AppError(404, "AMBIENTE_NAO_ENCONTRADO", "Ambiente sonoro pré-configurado não encontrado.");
+  }
+
+  if (publicado) {
+    await verificarAmbienteDuplicado(
+      ambienteExistente.nome,
+      ambienteExistente.audios.map((item) => ({
+        idAudio: item.idAudio,
+        volume: item.volume,
+      })),
+      idAmbienteSonoro,
+    );
   }
 
   const ambienteAtualizado = await prisma.ambienteSonoro.update({
@@ -675,7 +848,7 @@ export async function excluirAmbientePreConfigurado(idAmbienteSonoro: string) {
       idAmbienteSonoro,
       origem: ORIGEM_PRECONFIGURADO,
     },
-    select: { idAmbienteSonoro: true },
+    select: { idAmbienteSonoro: true, imagemPublicId: true },
   });
 
   if (!ambienteExistente) {

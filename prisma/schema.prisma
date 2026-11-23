@@ -158,6 +158,7 @@ model AmbienteSonoro {
   finalidade           Finalidade
   origem               String
   imagem               String?
+  imagemPublicId       String?
   autorImagem          String?
   tituloOriginalImagem String?
   fonteImagem          String?

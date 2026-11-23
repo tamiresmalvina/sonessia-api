@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { app } from "../src/app.js";
 import { prisma } from "../lib/prisma.js";
 import { Finalidade, Perfil } from "../generated/prisma/enums.js";
 import { emitirTokenAcesso } from "../src/utils/jwt.util.js";
 import { garantirBancoTestesIsolado } from "./helpers/isolamento-banco.helper.js";
+import {
+  cloudinary,
+  inicializarCloudinary,
+  resetarConfiguracaoCloudinaryParaTestes,
+} from "../src/config/cloudinary.js";
 
 describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)", () => {
   const prefixoTeste = "test_precfg_";
@@ -14,8 +19,17 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
     await garantirBancoTestesIsolado();
   });
 
+  beforeEach(() => {
+    inicializarCloudinary({
+      cloud_name: "cloud-falso-testes",
+      api_key: "chave-falsa-testes",
+      api_secret: "segredo-falso-testes",
+    });
+  });
+
   afterEach(async () => {
     vi.restoreAllMocks();
+    resetarConfiguracaoCloudinaryParaTestes();
     const usuarios = await prisma.usuario.findMany({
       where: { email: { startsWith: prefixoTeste } },
       select: { id: true },
@@ -96,7 +110,65 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
     });
   }
 
+  function criarPng(): Buffer {
+    const imagem = Buffer.alloc(33);
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(imagem, 0);
+    imagem.writeUInt32BE(13, 8);
+    imagem.write("IHDR", 12, "ascii");
+    imagem.writeUInt32BE(1, 16);
+    imagem.writeUInt32BE(1, 20);
+    imagem[24] = 8;
+    imagem[25] = 6;
+    return imagem;
+  }
+
+  function configurarCloudinaryImagem() {
+    vi.spyOn(cloudinary.uploader, "upload").mockImplementation(async (_arquivo, opcoes) => {
+      const opcoesRegistro = typeof opcoes === "object" && opcoes !== null
+        ? opcoes as Record<string, unknown>
+        : {};
+      const publicId = typeof opcoesRegistro.public_id === "string"
+        ? opcoesRegistro.public_id
+        : `sonessia/ambientes/${randomUUID()}`;
+      return {
+        public_id: publicId,
+        resource_type: "image",
+        type: "upload",
+        format: "png",
+        width: 1,
+        height: 1,
+        secure_url: `https://res.cloudinary.com/cloud-falso/image/upload/${publicId}.png`,
+      } as Awaited<ReturnType<typeof cloudinary.uploader.upload>>;
+    });
+    vi.spyOn(cloudinary.api, "delete_resources").mockResolvedValue({
+      deleted: {},
+    } as Awaited<ReturnType<typeof cloudinary.api.delete_resources>>);
+  }
+
   describe("Cadastro e autorização de ambientes pré-configurados (ADMIN)", () => {
+    it("lista ambientes pré-configurados para ADMIN", async () => {
+      const admin = await criarUsuario(Perfil.ADMIN);
+      const ambienteCriado = await prisma.ambienteSonoro.create({
+        data: {
+          idUsuario: admin.id,
+          nome: "Ambiente de listagem",
+          finalidade: Finalidade.SONO,
+          origem: "preconfigurado",
+        },
+      });
+
+      const resposta = await request(app)
+        .get("/ambientes-sonoros/pre-configurados")
+        .set("Authorization", `Bearer ${token(admin)}`);
+
+      expect(resposta.status).toBe(200);
+      expect(resposta.body.ambientes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ idAmbienteSonoro: ambienteCriado.idAmbienteSonoro }),
+        ]),
+      );
+    });
+
     it("permite que ADMIN cadastre ambiente pré-configurado com composição e volumes", async () => {
       const admin = await criarUsuario(Perfil.ADMIN);
       const audio1 = await criarAudio(admin.id, "Chuva leve");
@@ -134,6 +206,100 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
       expect(ambiente).not.toHaveProperty("idUsuario");
       expect(ambiente.audios[0]).not.toHaveProperty("arquivoPublicId");
       expect(ambiente.audios[0]).not.toHaveProperty("idUsuario");
+    });
+
+    it("aceita upload válido de imagem na criação e persiste URL e public ID", async () => {
+      configurarCloudinaryImagem();
+      const admin = await criarUsuario(Perfil.ADMIN);
+      const audio = await criarAudio(admin.id, "Chuva com imagem");
+      const resposta = await request(app)
+        .post("/ambientes-sonoros/pre-configurados")
+        .set("Authorization", `Bearer ${token(admin)}`)
+        .field("metadados", JSON.stringify({
+          nome: "Chuva Visual",
+          finalidade: "RELAXAMENTO",
+          autorImagem: "Autor",
+          licencaImagem: "CC0",
+          audios: [{ idAudio: audio.idAudio, volume: 55 }],
+        }))
+        .attach("imagem", criarPng(), {
+          filename: "capa.png",
+          contentType: "image/png",
+        });
+
+      expect(resposta.status).toBe(201);
+      expect(resposta.body.ambiente.imagem).toMatch(/^https:\/\/res\.cloudinary\.com\//);
+      expect(await prisma.ambienteSonoro.findUnique({
+        where: { idAmbienteSonoro: resposta.body.ambiente.idAmbienteSonoro },
+        select: { imagemPublicId: true },
+      })).toBeTruthy();
+    });
+
+    it("rejeita criação duplicada independentemente da ordem dos áudios", async () => {
+      const admin = await criarUsuario(Perfil.ADMIN);
+      const audio1 = await criarAudio(admin.id, "Áudio 1");
+      const audio2 = await criarAudio(admin.id, "Áudio 2");
+      const primeira = await request(app)
+        .post("/ambientes-sonoros/pre-configurados")
+        .set("Authorization", `Bearer ${token(admin)}`)
+        .send({
+          nome: "Ambiente Repetido",
+          finalidade: "ESTUDO",
+          audios: [
+            { idAudio: audio1.idAudio, volume: 50 },
+            { idAudio: audio2.idAudio, volume: 80 },
+          ],
+        });
+      expect(primeira.status).toBe(201);
+
+      const duplicada = await request(app)
+        .post("/ambientes-sonoros/pre-configurados")
+        .set("Authorization", `Bearer ${token(admin)}`)
+        .send({
+          nome: "Ambiente Repetido",
+          finalidade: "SONO",
+          audios: [
+            { idAudio: audio2.idAudio, volume: 80 },
+            { idAudio: audio1.idAudio, volume: 50 },
+          ],
+        });
+
+      expect(duplicada.status).toBe(409);
+      expect(duplicada.body.erro.codigo).toBe("AMBIENTE_PRE_CONFIGURADO_DUPLICADO");
+    });
+
+    it("permite composição igual em nomes diferentes e volumes diferentes no mesmo nome", async () => {
+      const admin = await criarUsuario(Perfil.ADMIN);
+      const audio = await criarAudio(admin.id, "Áudio volume");
+      const base = await request(app)
+        .post("/ambientes-sonoros/pre-configurados")
+        .set("Authorization", `Bearer ${token(admin)}`)
+        .send({
+          nome: "Base",
+          finalidade: "ESTUDO",
+          audios: [{ idAudio: audio.idAudio, volume: 50 }],
+        });
+      expect(base.status).toBe(201);
+
+      const nomeDiferente = await request(app)
+        .post("/ambientes-sonoros/pre-configurados")
+        .set("Authorization", `Bearer ${token(admin)}`)
+        .send({
+          nome: "Outra capa",
+          finalidade: "ESTUDO",
+          audios: [{ idAudio: audio.idAudio, volume: 50 }],
+        });
+      expect(nomeDiferente.status).toBe(201);
+
+      const volumeDiferente = await request(app)
+        .post("/ambientes-sonoros/pre-configurados")
+        .set("Authorization", `Bearer ${token(admin)}`)
+        .send({
+          nome: "Base",
+          finalidade: "ESTUDO",
+          audios: [{ idAudio: audio.idAudio, volume: 51 }],
+        });
+      expect(volumeDiferente.status).toBe(201);
     });
 
     it("bloqueia usuário comum ao tentar cadastrar ambiente pré-configurado com HTTP 403", async () => {
@@ -216,6 +382,93 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
   });
 
   describe("Edição e publicação/despublicação por ADMIN", () => {
+    it("não acusa duplicidade ao editar o próprio ambiente", async () => {
+      const admin = await criarUsuario(Perfil.ADMIN);
+      const audio = await criarAudio(admin.id, "Áudio próprio");
+      const criacao = await request(app)
+        .post("/ambientes-sonoros/pre-configurados")
+        .set("Authorization", `Bearer ${token(admin)}`)
+        .send({
+          nome: "Ambiente Próprio",
+          finalidade: "ESTUDO",
+          audios: [{ idAudio: audio.idAudio, volume: 45 }],
+        });
+      expect(criacao.status).toBe(201);
+
+      const edicao = await request(app)
+        .patch(`/ambientes-sonoros/pre-configurados/${criacao.body.ambiente.idAmbienteSonoro}`)
+        .set("Authorization", `Bearer ${token(admin)}`)
+        .send({
+          nome: "Ambiente Próprio",
+          audios: [{ idAudio: audio.idAudio, volume: 46 }],
+        });
+      expect(edicao.status).toBe(200);
+    });
+
+    it("bloqueia edição que torna a composição duplicada", async () => {
+      const admin = await criarUsuario(Perfil.ADMIN);
+      const audio = await criarAudio(admin.id, "Áudio duplicado");
+      await request(app)
+        .post("/ambientes-sonoros/pre-configurados")
+        .set("Authorization", `Bearer ${token(admin)}`)
+        .send({
+          nome: "Mesmo nome",
+          finalidade: "ESTUDO",
+          audios: [{ idAudio: audio.idAudio, volume: 50 }],
+        });
+      const segunda = await request(app)
+        .post("/ambientes-sonoros/pre-configurados")
+        .set("Authorization", `Bearer ${token(admin)}`)
+        .send({
+          nome: "Nome diferente",
+          finalidade: "ESTUDO",
+          audios: [{ idAudio: audio.idAudio, volume: 60 }],
+        });
+      expect(segunda.status).toBe(201);
+
+      const edicao = await request(app)
+        .patch(`/ambientes-sonoros/pre-configurados/${segunda.body.ambiente.idAmbienteSonoro}`)
+        .set("Authorization", `Bearer ${token(admin)}`)
+        .send({
+          nome: "Mesmo nome",
+          audios: [{ idAudio: audio.idAudio, volume: 50 }],
+        });
+      expect(edicao.status).toBe(409);
+      expect(edicao.body.erro.codigo).toBe("AMBIENTE_PRE_CONFIGURADO_DUPLICADO");
+    });
+
+    it("bloqueia publicação de ambiente duplicado", async () => {
+      const admin = await criarUsuario(Perfil.ADMIN);
+      const audio = await criarAudio(admin.id, "Áudio publicação");
+      const cat = await prisma.categoria.findFirst({ where: { tipo: "AMBIENTE" } });
+      const idCategoria = cat?.idCategoria;
+      const criarDireto = async (nome: string) => prisma.ambienteSonoro.create({
+        data: {
+          idUsuario: admin.id,
+          idCategoria: idCategoria ?? null,
+          nome: "Publicável",
+          finalidade: Finalidade.ESTUDO,
+          publicado: false,
+          origem: "preconfigurado",
+        },
+      }).then(async (ambiente) => {
+        await prisma.ambienteSonoroAudio.create({
+          data: { idAmbienteSonoro: ambiente.idAmbienteSonoro, idAudio: audio.idAudio, volume: 50 },
+        });
+        return ambiente;
+      });
+
+      const primeiro = await criarDireto("Publicável");
+      const segundo = await criarDireto("Publicável");
+      const publicacao = await request(app)
+        .patch(`/ambientes-sonoros/pre-configurados/${segundo.idAmbienteSonoro}/publicacao`)
+        .set("Authorization", `Bearer ${token(admin)}`)
+        .send({ publicado: true });
+      expect(primeiro.idAmbienteSonoro).not.toBe(segundo.idAmbienteSonoro);
+      expect(publicacao.status).toBe(409);
+      expect(publicacao.body.erro.codigo).toBe("AMBIENTE_PRE_CONFIGURADO_DUPLICADO");
+    });
+
     it("permite que ADMIN edite metadados e composição de ambiente pré-configurado", async () => {
       const admin = await criarUsuario(Perfil.ADMIN);
       const audio1 = await criarAudio(admin.id, "Ondas");

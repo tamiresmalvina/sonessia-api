@@ -225,7 +225,7 @@ function detectarImagem(
   return null;
 }
 
-function validarImagem(
+export function validarImagem(
   conteudo: Buffer,
   tipoDeclarado?: string
 ): TipoConteudoImagem {

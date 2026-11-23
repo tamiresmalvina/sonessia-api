@@ -99,7 +99,8 @@ export async function criarAmbientePreConfigurado(req: Request, res: Response, n
   try {
     const ambiente = await servicoAmbienteSonoro.criarAmbientePreConfigurado(
       idUsuario(req),
-      req.body
+      req.metadadosAmbiente ?? req.body,
+      req.arquivoImagemAmbiente,
     );
     res.status(201).json({
       mensagem: "Ambiente sonoro pré-configurado criado com sucesso.",
@@ -145,7 +146,8 @@ export async function atualizarAmbientePreConfigurado(req: Request, res: Respons
   try {
     const ambiente = await servicoAmbienteSonoro.atualizarAmbientePreConfigurado(
       idAmbienteSonoro(req),
-      req.body
+      req.metadadosAmbiente ?? req.body,
+      req.arquivoImagemAmbiente,
     );
     res.status(200).json({
       mensagem: "Ambiente sonoro pré-configurado atualizado com sucesso.",

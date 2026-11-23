@@ -20,6 +20,7 @@ import { autenticar } from "../middlewares/autenticacao.middleware.js";
 import { exigirPerfil } from "../middlewares/autorizacao.middleware.js";
 import { validarOrigemMutacao } from "../middlewares/origem.middleware.js";
 import { validarCorpo } from "../middlewares/validacao.middleware.js";
+import { receberImagemAmbiente } from "../middlewares/ambiente-imagem.middleware.js";
 import {
   schemaAtualizarAmbientePreConfigurado,
   schemaAtualizarAmbienteSonoro,
@@ -48,6 +49,7 @@ rotasAmbientesSonoros.post(
   "/pre-configurados",
   validarOrigemMutacao,
   ...protegerAdmin,
+  receberImagemAmbiente,
   validarCorpo(schemaCriarAmbientePreConfigurado),
   criarAmbientePreConfigurado
 );
@@ -68,6 +70,7 @@ rotasAmbientesSonoros.patch(
   "/pre-configurados/:idAmbienteSonoro",
   validarOrigemMutacao,
   ...protegerAdmin,
+  receberImagemAmbiente,
   validarCorpo(schemaAtualizarAmbientePreConfigurado),
   atualizarAmbientePreConfigurado
 );
@@ -76,6 +79,7 @@ rotasAmbientesSonoros.put(
   "/pre-configurados/:idAmbienteSonoro",
   validarOrigemMutacao,
   ...protegerAdmin,
+  receberImagemAmbiente,
   validarCorpo(schemaAtualizarAmbientePreConfigurado),
   atualizarAmbientePreConfigurado
 );

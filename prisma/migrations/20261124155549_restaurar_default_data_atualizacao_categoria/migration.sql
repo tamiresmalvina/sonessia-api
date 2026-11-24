@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Categoria" ALTER COLUMN "dataAtualizacao" SET DEFAULT CURRENT_TIMESTAMP;

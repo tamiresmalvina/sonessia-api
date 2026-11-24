@@ -192,6 +192,7 @@ export type EntradaAtualizarDataNascimento = z.infer<
 
 export const schemaSolicitarAlteracaoEmail = z
   .object({
+    senhaAtual: z.string().min(1).max(128),
     novoEmail: z
       .string()
       .trim()
@@ -207,16 +208,22 @@ export type EntradaSolicitarAlteracaoEmail = z.infer<
 
 export const schemaConfirmarAlteracaoEmail = z
   .object({
-    token: z
+    codigo: z
       .string()
       .trim()
-      .regex(/^[0-9a-fA-F]{64}$/, "Token de confirmação em formato inválido."),
+      .regex(/^\d{6}$/, "O código de confirmação deve conter 6 dígitos."),
   })
   .strict();
 
 export type EntradaConfirmarAlteracaoEmail = z.infer<
   typeof schemaConfirmarAlteracaoEmail
 >;
+
+export const schemaReenviarCodigoAlteracaoEmail = z
+  .object({})
+  .strict()
+  .optional()
+  .default({});
 
 export const schemaSolicitarRecuperacaoSenha = z.object({
   email: z
@@ -247,6 +254,20 @@ export const schemaRedefinirSenha = z.object({
 });
 
 export type EntradaRedefinirSenha = z.infer<typeof schemaRedefinirSenha>;
+
+export const schemaAlterarSenha = z
+  .object({
+    senhaAtual: z.string().min(1).max(128),
+    novaSenha: schemaSenhaForte,
+    confirmarNovaSenha: z.string().min(1).max(128),
+  })
+  .strict()
+  .refine((dados) => dados.novaSenha === dados.confirmarNovaSenha, {
+    path: ["confirmarNovaSenha"],
+    message: "A confirmação deve ser igual à nova senha.",
+  });
+
+export type EntradaAlterarSenha = z.infer<typeof schemaAlterarSenha>;
 
 export const schemaSolicitarExclusaoConta = z
   .object({

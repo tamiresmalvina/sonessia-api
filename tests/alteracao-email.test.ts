@@ -10,18 +10,26 @@ import { emitirTokenAcesso } from "../src/utils/jwt.util.js";
 import {
   definirForcarExecucaoEtherealEmTestes,
   definirInterceptadorAlteracaoEmailTeste,
+  definirInterceptadorNotificacaoAlteracaoEmailTeste,
   definirTransportadorCustomizado,
   enviarEmailConfirmacaoAlteracaoEmail,
   resetarTransportadorEthereal,
   type ParametrosEnvioConfirmacaoAlteracaoEmail,
 } from "../src/utils/email.util.js";
 import { gerarHashSenha } from "../src/utils/senha.util.js";
+import { gerarHashCodigo } from "../src/utils/codigo.util.js";
 import { gerarHashToken } from "../src/utils/token.util.js";
 import { garantirBancoTestesIsolado } from "./helpers/isolamento-banco.helper.js";
 
 describe("Alteração segura do próprio e-mail", () => {
   const prefixoTeste = "test_alteracao_email_";
-  const tokensEnviados: Partial<
+  const senhaTeste = "SenhaAtual@123";
+  const notificacoesEnviadas: string[] = [];
+  let confirmacoesEnviadas = 0;
+  const codigosEnviados: Partial<
+    Record<ParametrosEnvioConfirmacaoAlteracaoEmail["etapa"], string>
+  > = {};
+  const destinatariosCodigos: Partial<
     Record<ParametrosEnvioConfirmacaoAlteracaoEmail["etapa"], string>
   > = {};
 
@@ -30,16 +38,27 @@ describe("Alteração segura do próprio e-mail", () => {
   });
 
   beforeEach(() => {
-    delete tokensEnviados.atual;
-    delete tokensEnviados.novo;
+    delete codigosEnviados.atual;
+    delete codigosEnviados.novo;
+    delete destinatariosCodigos.atual;
+    delete destinatariosCodigos.novo;
+    notificacoesEnviadas.length = 0;
+    confirmacoesEnviadas = 0;
     definirInterceptadorAlteracaoEmailTeste(async (parametros) => {
-      tokensEnviados[parametros.etapa] = parametros.token;
+      confirmacoesEnviadas += 1;
+      codigosEnviados[parametros.etapa] = parametros.codigo;
+      destinatariosCodigos[parametros.etapa] = parametros.destinatario;
       return { sucesso: true, status: "ENVIADO", mensagemId: "email-teste-id" };
+    });
+    definirInterceptadorNotificacaoAlteracaoEmailTeste(async (parametros) => {
+      notificacoesEnviadas.push(parametros.destinatario);
+      return { sucesso: true, status: "ENVIADO", mensagemId: "notificacao-teste-id" };
     });
   });
 
   afterEach(async () => {
     definirInterceptadorAlteracaoEmailTeste(null);
+    definirInterceptadorNotificacaoAlteracaoEmailTeste(null);
     definirForcarExecucaoEtherealEmTestes(false);
     definirTransportadorCustomizado(null);
     resetarTransportadorEthereal();
@@ -51,13 +70,13 @@ describe("Alteração segura do próprio e-mail", () => {
 
   async function criarUsuarioTeste(
     perfil: Perfil = Perfil.COMUM,
-    senhaHash = "hash-de-teste"
+    senhaHash?: string
   ) {
     return prisma.usuario.create({
       data: {
         nome: "Usuário Alteração E-mail",
         email: `${prefixoTeste}${randomUUID()}@teste.com`,
-        senha: senhaHash,
+        senha: senhaHash ?? (await gerarHashSenha(senhaTeste)),
         dataNascimento: new Date("1994-06-20"),
         emailVerificado: true,
         perfil,
@@ -72,32 +91,61 @@ describe("Alteração segura do próprio e-mail", () => {
   async function solicitarAlteracao(
     idUsuario: string,
     versaoToken: number,
-    novoEmail: string
+    novoEmail: string,
+    senhaAtual = senhaTeste
   ) {
     return request(app)
       .post("/autenticacao/solicitar-alteracao-email")
       .set("Authorization", `Bearer ${criarTokenAcesso(idUsuario, versaoToken)}`)
-      .send({ novoEmail });
+      .send({ novoEmail, senhaAtual });
   }
 
   async function confirmarEmailAtual(usuario: {
     id: string;
     versaoToken: number;
-  }, token = tokensEnviados.atual) {
+  }, codigo = codigosEnviados.atual) {
     return request(app)
       .post("/autenticacao/confirmar-email-atual")
       .set("Authorization", `Bearer ${criarTokenAcesso(usuario.id, usuario.versaoToken)}`)
-      .send({ token });
+      .send({ codigo });
   }
 
   async function confirmarNovoEmail(usuario: {
     id: string;
     versaoToken: number;
-  }, token = tokensEnviados.novo) {
+  }, codigo = codigosEnviados.novo) {
     return request(app)
       .post("/autenticacao/confirmar-novo-email")
       .set("Authorization", `Bearer ${criarTokenAcesso(usuario.id, usuario.versaoToken)}`)
-      .send({ token });
+      .send({ codigo });
+  }
+
+  async function consultarAlteracaoPendente(usuario: {
+    id: string;
+    versaoToken: number;
+  }) {
+    return request(app)
+      .get("/autenticacao/eu/alteracao-email")
+      .set("Authorization", `Bearer ${criarTokenAcesso(usuario.id, usuario.versaoToken)}`);
+  }
+
+  async function reenviarCodigo(usuario: {
+    id: string;
+    versaoToken: number;
+  }) {
+    return request(app)
+      .post("/autenticacao/eu/alteracao-email/reenviar-codigo")
+      .set("Authorization", `Bearer ${criarTokenAcesso(usuario.id, usuario.versaoToken)}`)
+      .send({});
+  }
+
+  async function cancelarAlteracao(usuario: {
+    id: string;
+    versaoToken: number;
+  }) {
+    return request(app)
+      .delete("/autenticacao/eu/alteracao-email")
+      .set("Authorization", `Bearer ${criarTokenAcesso(usuario.id, usuario.versaoToken)}`);
   }
 
   it.each([Perfil.COMUM, Perfil.ADMIN])(
@@ -124,7 +172,7 @@ describe("Alteração segura do próprio e-mail", () => {
         mensagem:
           "Se a solicitação puder ser processada, as instruções serão enviadas ao e-mail atual.",
       });
-      expect(JSON.stringify(solicitacao.body)).not.toContain(tokensEnviados.atual);
+      expect(JSON.stringify(solicitacao.body)).not.toContain(codigosEnviados.atual);
 
       let usuarioAtual = await prisma.usuario.findUnique({
         where: { id: usuario.id },
@@ -135,15 +183,17 @@ describe("Alteração segura do próprio e-mail", () => {
       expect(
         (await prisma.sessao.findUnique({ where: { id: sessao.id } }))?.status
       ).toBe(StatusSessao.ATIVA);
-      expect(tokensEnviados.atual).toMatch(/^[0-9a-f]{64}$/);
-      expect(tokensEnviados.novo).toBeUndefined();
+      expect(codigosEnviados.atual).toMatch(/^\d{6}$/);
+      expect(destinatariosCodigos.atual).toBe(usuario.email);
+      expect(codigosEnviados.novo).toBeUndefined();
 
       const confirmacaoAtual = await confirmarEmailAtual(usuario);
       expect(confirmacaoAtual.status).toBe(200);
       expect(confirmacaoAtual.body.mensagem).toBe(
         "Confirmação do novo e-mail enviada."
       );
-      expect(tokensEnviados.novo).toMatch(/^[0-9a-f]{64}$/);
+      expect(codigosEnviados.novo).toMatch(/^\d{6}$/);
+      expect(destinatariosCodigos.novo).toBe(novoEmail);
 
       usuarioAtual = await prisma.usuario.findUnique({
         where: { id: usuario.id },
@@ -159,10 +209,10 @@ describe("Alteração segura do próprio e-mail", () => {
       });
       expect(alteracaoPendente?.tokenEmailAtualHash).toBeNull();
       expect(alteracaoPendente?.tokenEmailNovoHash).toBe(
-        gerarHashToken(tokensEnviados.novo!)
+        gerarHashCodigo(codigosEnviados.novo!)
       );
       expect(JSON.stringify(confirmacaoAtual.body)).not.toContain(
-        tokensEnviados.novo
+        codigosEnviados.novo
       );
 
       const confirmacaoNovo = await confirmarNovoEmail(usuario);
@@ -170,7 +220,10 @@ describe("Alteração segura do próprio e-mail", () => {
       expect(confirmacaoNovo.body.mensagem).toBe(
         "E-mail atualizado com sucesso. Entre novamente para continuar."
       );
-      expect(JSON.stringify(confirmacaoNovo.body)).not.toContain(tokensEnviados.novo);
+      expect(JSON.stringify(confirmacaoNovo.body)).not.toContain(codigosEnviados.novo);
+      expect(notificacoesEnviadas.sort()).toEqual(
+        [usuario.email, novoEmail].sort()
+      );
 
       usuarioAtual = await prisma.usuario.findUnique({
         where: { id: usuario.id },
@@ -197,6 +250,7 @@ describe("Alteração segura do próprio e-mail", () => {
         where: { idUsuario: usuario.id, emailNovo: novoEmail },
       });
       expect(alteracao?.concluidaEm).toBeInstanceOf(Date);
+      expect(alteracao?.ipSolicitacao).toBeTruthy();
       expect(alteracao?.tokenEmailAtualHash).toBeNull();
       expect(alteracao?.tokenEmailNovoHash).toBeNull();
 
@@ -209,10 +263,10 @@ describe("Alteração segura do próprio e-mail", () => {
 
       const repeticaoNovoToken = await confirmarNovoEmail(
         { id: usuario.id, versaoToken: usuario.versaoToken + 1 },
-        tokensEnviados.novo
+        codigosEnviados.novo
       );
       expect(repeticaoNovoToken.status).toBe(400);
-      expect(repeticaoNovoToken.body.erro.codigo).toBe("TOKEN_INVALIDO");
+      expect(repeticaoNovoToken.body.erro.codigo).toBe("CODIGO_INVALIDO");
     }
   );
 
@@ -228,7 +282,8 @@ describe("Alteração segura do próprio e-mail", () => {
     const solicitacao = await solicitarAlteracao(
       usuario.id,
       usuario.versaoToken,
-      novoEmail
+      novoEmail,
+      senhaOriginal
     );
     expect(solicitacao.status).toBe(202);
 
@@ -283,6 +338,373 @@ describe("Alteração segura do próprio e-mail", () => {
     expect(loginComSenhaIncorreta.body.erro.codigo).toBe("CREDENCIAIS_INVALIDAS");
   });
 
+  it("rejeita solicitação quando a senha atual está incorreta", async () => {
+    const usuario = await criarUsuarioTeste();
+    const resposta = await solicitarAlteracao(
+      usuario.id,
+      usuario.versaoToken,
+      `${prefixoTeste}senha_incorreta_${randomUUID()}@teste.com`,
+      "SenhaIncorreta@123"
+    );
+
+    expect(resposta.status).toBe(401);
+    expect(resposta.body.erro.codigo).toBe("SENHA_ATUAL_INVALIDA");
+    expect(
+      await prisma.alteracaoEmail.count({ where: { idUsuario: usuario.id } })
+    ).toBe(0);
+    expect(codigosEnviados.atual).toBeUndefined();
+  });
+
+  it("armazena somente HMAC e inicia dez minutos independentes em cada etapa", async () => {
+    const usuario = await criarUsuarioTeste();
+    await solicitarAlteracao(
+      usuario.id,
+      usuario.versaoToken,
+      `${prefixoTeste}validade_${randomUUID()}@teste.com`
+    );
+
+    const primeiraEtapa = await prisma.alteracaoEmail.findFirst({
+      where: { idUsuario: usuario.id },
+    });
+    expect(codigosEnviados.atual).toMatch(/^\d{6}$/);
+    expect(primeiraEtapa?.tokenEmailAtualHash).toBe(
+      gerarHashCodigo(codigosEnviados.atual!)
+    );
+    expect(primeiraEtapa?.tokenEmailAtualHash).not.toContain(
+      codigosEnviados.atual
+    );
+    expect(
+      primeiraEtapa!.expiraEm.getTime() -
+        primeiraEtapa!.codigoEnviadoEm!.getTime()
+    ).toBe(10 * 60 * 1000);
+
+    expect((await confirmarEmailAtual(usuario)).status).toBe(200);
+    const segundaEtapa = await prisma.alteracaoEmail.findFirst({
+      where: { idUsuario: usuario.id },
+    });
+    expect(codigosEnviados.novo).toMatch(/^\d{6}$/);
+    expect(segundaEtapa?.tokenEmailAtualHash).toBeNull();
+    expect(segundaEtapa?.tokenEmailNovoHash).toBe(
+      gerarHashCodigo(codigosEnviados.novo!)
+    );
+    expect(segundaEtapa?.tentativasCodigo).toBe(0);
+    expect(segundaEtapa?.reenviosCodigo).toBe(0);
+    expect(
+      segundaEtapa!.expiraEm.getTime() -
+        segundaEtapa!.codigoEnviadoEm!.getTime()
+    ).toBe(10 * 60 * 1000);
+  });
+
+  it("reenvia um código novo após o cooldown e invalida o código anterior", async () => {
+    const usuario = await criarUsuarioTeste();
+    await solicitarAlteracao(
+      usuario.id,
+      usuario.versaoToken,
+      `${prefixoTeste}reenvio_${randomUUID()}@teste.com`
+    );
+    const codigoAnterior = codigosEnviados.atual!;
+
+    const cedoDemais = await reenviarCodigo(usuario);
+    expect(cedoDemais.status).toBe(429);
+    expect(cedoDemais.body.erro.codigo).toBe("REENVIO_CODIGO_AGUARDE");
+
+    await prisma.alteracaoEmail.updateMany({
+      where: { idUsuario: usuario.id },
+      data: { codigoEnviadoEm: new Date(Date.now() - 61_000) },
+    });
+    const reenvio = await reenviarCodigo(usuario);
+    const codigoNovo = codigosEnviados.atual!;
+    expect(reenvio.status).toBe(200);
+    expect(codigoNovo).toMatch(/^\d{6}$/);
+    expect(codigoNovo).not.toBe(codigoAnterior);
+    expect(destinatariosCodigos.atual).toBe(usuario.email);
+
+    const alteracao = await prisma.alteracaoEmail.findFirst({
+      where: { idUsuario: usuario.id },
+    });
+    expect(alteracao?.tokenEmailAtualHash).toBe(gerarHashCodigo(codigoNovo));
+    expect(alteracao?.reenviosCodigo).toBe(1);
+    expect(alteracao?.tentativasCodigo).toBe(0);
+    expect(
+      alteracao!.expiraEm.getTime() - alteracao!.codigoEnviadoEm!.getTime()
+    ).toBe(10 * 60 * 1000);
+
+    const codigoSubstituido = await confirmarEmailAtual(usuario, codigoAnterior);
+    expect(codigoSubstituido.status).toBe(400);
+    expect(codigoSubstituido.body.erro.codigo).toBe("CODIGO_INVALIDO");
+    expect((await confirmarEmailAtual(usuario, codigoNovo)).status).toBe(200);
+  });
+
+  it("limita a cinco tentativas e exige reenvio para continuar", async () => {
+    const usuario = await criarUsuarioTeste();
+    await solicitarAlteracao(
+      usuario.id,
+      usuario.versaoToken,
+      `${prefixoTeste}tentativas_${randomUUID()}@teste.com`
+    );
+
+    for (let tentativa = 1; tentativa <= 5; tentativa += 1) {
+      const resposta = await confirmarEmailAtual(usuario, "000000");
+      expect(resposta.status).toBe(tentativa === 5 ? 429 : 400);
+      expect(resposta.body.erro.codigo).toBe(
+        tentativa === 5 ? "LIMITE_TENTATIVAS_CODIGO" : "CODIGO_INVALIDO"
+      );
+    }
+
+    let alteracao = await prisma.alteracaoEmail.findFirst({
+      where: { idUsuario: usuario.id },
+    });
+    expect(alteracao?.tentativasCodigo).toBe(5);
+    expect(alteracao?.tokenEmailAtualHash).toBeNull();
+
+    await prisma.alteracaoEmail.update({
+      where: { id: alteracao!.id },
+      data: { codigoEnviadoEm: new Date(Date.now() - 61_000) },
+    });
+    expect((await reenviarCodigo(usuario)).status).toBe(200);
+    alteracao = await prisma.alteracaoEmail.findUnique({
+      where: { id: alteracao!.id },
+    });
+    expect(alteracao?.tentativasCodigo).toBe(0);
+    expect(alteracao?.reenviosCodigo).toBe(1);
+    expect(alteracao?.tokenEmailAtualHash).toBe(
+      gerarHashCodigo(codigosEnviados.atual!)
+    );
+  });
+
+  it("limita reenvios a três por etapa e reinicia a cota na segunda etapa", async () => {
+    const usuario = await criarUsuarioTeste();
+    await solicitarAlteracao(
+      usuario.id,
+      usuario.versaoToken,
+      `${prefixoTeste}limite_reenvios_${randomUUID()}@teste.com`
+    );
+    const alteracaoInicial = await prisma.alteracaoEmail.findFirst({
+      where: { idUsuario: usuario.id },
+    });
+
+    for (let reenvio = 1; reenvio <= 3; reenvio += 1) {
+      await prisma.alteracaoEmail.update({
+        where: { id: alteracaoInicial!.id },
+        data: { codigoEnviadoEm: new Date(Date.now() - 61_000) },
+      });
+      expect((await reenviarCodigo(usuario)).status).toBe(200);
+    }
+
+    await prisma.alteracaoEmail.update({
+      where: { id: alteracaoInicial!.id },
+      data: { codigoEnviadoEm: new Date(Date.now() - 61_000) },
+    });
+    const excesso = await reenviarCodigo(usuario);
+    expect(excesso.status).toBe(429);
+    expect(excesso.body.erro.codigo).toBe("LIMITE_REENVIO_CODIGO");
+
+    expect((await confirmarEmailAtual(usuario)).status).toBe(200);
+    const segundaEtapa = await prisma.alteracaoEmail.findUnique({
+      where: { id: alteracaoInicial!.id },
+    });
+    expect(segundaEtapa?.reenviosCodigo).toBe(0);
+    await prisma.alteracaoEmail.update({
+      where: { id: alteracaoInicial!.id },
+      data: { codigoEnviadoEm: new Date(Date.now() - 61_000) },
+    });
+    expect((await reenviarCodigo(usuario)).status).toBe(200);
+    expect(destinatariosCodigos.novo).toBe(segundaEtapa?.emailNovo);
+    const segundaEtapaAtualizada = await prisma.alteracaoEmail.findUnique({
+      where: { id: alteracaoInicial!.id },
+    });
+    expect(segundaEtapaAtualizada?.reenviosCodigo).toBe(1);
+  });
+
+  it("aceita o mesmo HMAC em solicitações diferentes sem procurar globalmente pelo código", async () => {
+    const primeiroUsuario = await criarUsuarioTeste();
+    const segundoUsuario = await criarUsuarioTeste();
+    await solicitarAlteracao(
+      primeiroUsuario.id,
+      primeiroUsuario.versaoToken,
+      `${prefixoTeste}otp_igual_a_${randomUUID()}@teste.com`
+    );
+    await solicitarAlteracao(
+      segundoUsuario.id,
+      segundoUsuario.versaoToken,
+      `${prefixoTeste}otp_igual_b_${randomUUID()}@teste.com`
+    );
+
+    await prisma.alteracaoEmail.updateMany({
+      where: { idUsuario: { in: [primeiroUsuario.id, segundoUsuario.id] } },
+      data: { tokenEmailAtualHash: gerarHashCodigo("123456") },
+    });
+
+    expect(
+      (await confirmarEmailAtual(primeiroUsuario, "123456")).status
+    ).toBe(200);
+    expect(
+      (await confirmarEmailAtual(segundoUsuario, "123456")).status
+    ).toBe(200);
+  });
+
+  it("serializa confirmações simultâneas e conclui a alteração uma única vez", async () => {
+    const usuario = await criarUsuarioTeste();
+    await solicitarAlteracao(
+      usuario.id,
+      usuario.versaoToken,
+      `${prefixoTeste}confirmacao_simultanea_${randomUUID()}@teste.com`
+    );
+
+    const confirmacoesAtuais = await Promise.all([
+      confirmarEmailAtual(usuario),
+      confirmarEmailAtual(usuario),
+    ]);
+    expect(confirmacoesAtuais.map((resposta) => resposta.status).sort()).toEqual([
+      200,
+      400,
+    ]);
+    expect(confirmacoesEnviadas).toBe(2);
+
+    const codigoNovo = codigosEnviados.novo!;
+    const confirmacoesNovas = await Promise.all([
+      confirmarNovoEmail(usuario, codigoNovo),
+      confirmarNovoEmail(usuario, codigoNovo),
+    ]);
+    expect(confirmacoesNovas.map((resposta) => resposta.status).sort()).toEqual([
+      200,
+      400,
+    ]);
+    expect(notificacoesEnviadas).toHaveLength(2);
+  });
+
+  it("serializa reenvios simultâneos para respeitar o cooldown", async () => {
+    const usuario = await criarUsuarioTeste();
+    await solicitarAlteracao(
+      usuario.id,
+      usuario.versaoToken,
+      `${prefixoTeste}reenvio_simultaneo_${randomUUID()}@teste.com`
+    );
+    const alteracao = await prisma.alteracaoEmail.findFirst({
+      where: { idUsuario: usuario.id },
+    });
+    await prisma.alteracaoEmail.update({
+      where: { id: alteracao!.id },
+      data: { codigoEnviadoEm: new Date(Date.now() - 61_000) },
+    });
+
+    const respostas = await Promise.all([
+      reenviarCodigo(usuario),
+      reenviarCodigo(usuario),
+    ]);
+    expect(respostas.map((resposta) => resposta.status).sort()).toEqual([
+      200,
+      429,
+    ]);
+    expect(confirmacoesEnviadas).toBe(2);
+    expect(
+      (await prisma.alteracaoEmail.findUnique({ where: { id: alteracao!.id } }))
+        ?.reenviosCodigo
+    ).toBe(1);
+  });
+
+  it("exige autenticação para consultar ou cancelar uma solicitação", async () => {
+    const consulta = await request(app).get("/autenticacao/eu/alteracao-email");
+    const cancelamento = await request(app).delete(
+      "/autenticacao/eu/alteracao-email"
+    );
+    const reenvio = await request(app)
+      .post("/autenticacao/eu/alteracao-email/reenviar-codigo")
+      .send({});
+
+    expect(consulta.status).toBe(401);
+    expect(consulta.body.erro.codigo).toBe("NAO_AUTENTICADO");
+    expect(cancelamento.status).toBe(401);
+    expect(cancelamento.body.erro.codigo).toBe("NAO_AUTENTICADO");
+    expect(reenvio.status).toBe(401);
+    expect(reenvio.body.erro.codigo).toBe("NAO_AUTENTICADO");
+  });
+
+  it("consulta apenas dados de interface e reflete a etapa atual da confirmação", async () => {
+    const usuario = await criarUsuarioTeste();
+    const novoEmail = `${prefixoTeste}consulta_${randomUUID()}@teste.com`;
+
+    const consultaVazia = await consultarAlteracaoPendente(usuario);
+    expect(consultaVazia.status).toBe(200);
+    expect(consultaVazia.body).toEqual({ solicitacaoPendente: null });
+
+    await solicitarAlteracao(usuario.id, usuario.versaoToken, novoEmail);
+    const consultaEmailAtual = await consultarAlteracaoPendente(usuario);
+    expect(consultaEmailAtual.status).toBe(200);
+    expect(consultaEmailAtual.body.solicitacaoPendente).toEqual({
+      novoEmail,
+      etapa: "CONFIRMAR_EMAIL_ATUAL",
+      expiraEm: expect.any(String),
+      solicitadaEm: expect.any(String),
+      codigoEnviadoEm: expect.any(String),
+      reenvioDisponivelEm: expect.any(String),
+      reenviosRestantes: 3,
+    });
+    expect(JSON.stringify(consultaEmailAtual.body)).not.toContain(codigosEnviados.atual);
+    expect(JSON.stringify(consultaEmailAtual.body)).not.toContain("tokenEmailAtualHash");
+
+    expect((await confirmarEmailAtual(usuario)).status).toBe(200);
+    const consultaNovoEmail = await consultarAlteracaoPendente(usuario);
+    expect(consultaNovoEmail.body.solicitacaoPendente).toMatchObject({
+      novoEmail,
+      etapa: "CONFIRMAR_NOVO_EMAIL",
+    });
+    expect(JSON.stringify(consultaNovoEmail.body)).not.toContain(codigosEnviados.novo);
+  });
+
+  it("cancela uma solicitação e invalida o token pendente do novo endereço", async () => {
+    const usuario = await criarUsuarioTeste();
+    await solicitarAlteracao(
+      usuario.id,
+      usuario.versaoToken,
+      `${prefixoTeste}cancelamento_${randomUUID()}@teste.com`
+    );
+    expect((await confirmarEmailAtual(usuario)).status).toBe(200);
+    const codigoNovo = codigosEnviados.novo!;
+
+    const cancelamento = await cancelarAlteracao(usuario);
+    expect(cancelamento.status).toBe(200);
+    expect(cancelamento.body.mensagem).toBe(
+      "Solicitação de alteração de e-mail cancelada com sucesso."
+    );
+
+    const alteracao = await prisma.alteracaoEmail.findFirst({
+      where: { idUsuario: usuario.id },
+    });
+    expect(alteracao?.invalidadaEm).toBeInstanceOf(Date);
+    expect(alteracao?.tokenEmailAtualHash).toBeNull();
+    expect(alteracao?.tokenEmailNovoHash).toBeNull();
+
+    const tokenCancelado = await confirmarNovoEmail(usuario, codigoNovo);
+    expect(tokenCancelado.status).toBe(400);
+    expect(tokenCancelado.body.erro.codigo).toBe("CODIGO_INVALIDO");
+    expect((await consultarAlteracaoPendente(usuario)).body).toEqual({
+      solicitacaoPendente: null,
+    });
+  });
+
+  it("serializa solicitações simultâneas do mesmo usuário", async () => {
+    const usuario = await criarUsuarioTeste();
+    const [primeira, segunda] = await Promise.all([
+      solicitarAlteracao(
+        usuario.id,
+        usuario.versaoToken,
+        `${prefixoTeste}simultanea_a_${randomUUID()}@teste.com`
+      ),
+      solicitarAlteracao(
+        usuario.id,
+        usuario.versaoToken,
+        `${prefixoTeste}simultanea_b_${randomUUID()}@teste.com`
+      ),
+    ]);
+
+    expect([primeira.status, segunda.status]).toEqual([202, 202]);
+    expect(
+      await prisma.alteracaoEmail.count({ where: { idUsuario: usuario.id } })
+    ).toBe(1);
+    expect(confirmacoesEnviadas).toBe(1);
+  });
+
   it("não retorna sucesso nem altera o e-mail quando a transação final falha", async () => {
     const usuario = await criarUsuarioTeste();
     const novoEmail = `${prefixoTeste}falha_transacao_${randomUUID()}@teste.com`;
@@ -313,16 +735,19 @@ describe("Alteração segura do próprio e-mail", () => {
   it("rejeita solicitação sem autenticação", async () => {
     const resposta = await request(app)
       .post("/autenticacao/solicitar-alteracao-email")
-      .send({ novoEmail: "novo@teste.com" });
+      .send({ novoEmail: "novo@teste.com", senhaAtual: senhaTeste });
 
     expect(resposta.status).toBe(401);
     expect(resposta.body.erro.codigo).toBe("NAO_AUTENTICADO");
   });
 
   it.each([
-    ["/autenticacao/solicitar-alteracao-email", { novoEmail: "novo@teste.com" }],
-    ["/autenticacao/confirmar-email-atual", { token: "a".repeat(64) }],
-    ["/autenticacao/confirmar-novo-email", { token: "a".repeat(64) }],
+    [
+      "/autenticacao/solicitar-alteracao-email",
+      { novoEmail: "novo@teste.com", senhaAtual: senhaTeste },
+    ],
+    ["/autenticacao/confirmar-email-atual", { codigo: "123456" }],
+    ["/autenticacao/confirmar-novo-email", { codigo: "123456" }],
   ])("rejeita usuário não autenticado em %s", async (rota, corpo) => {
     const resposta = await request(app).post(rota).send(corpo);
 
@@ -341,7 +766,7 @@ describe("Alteração segura do próprio e-mail", () => {
       const respostaSemOrigemConfigurada = await request(app)
         .post("/autenticacao/solicitar-alteracao-email")
         .set("Origin", "https://origem-nao-autorizada.example")
-        .send({ novoEmail: "novo@teste.com" });
+        .send({ novoEmail: "novo@teste.com", senhaAtual: senhaTeste });
 
       expect(respostaSemOrigemConfigurada.status).toBe(403);
       expect(respostaSemOrigemConfigurada.body.erro.codigo).toBe(
@@ -353,7 +778,7 @@ describe("Alteração segura do próprio e-mail", () => {
       const respostaOrigemConfigurada = await request(app)
         .post("/autenticacao/solicitar-alteracao-email")
         .set("Origin", "https://app.sonessia.example")
-        .send({ novoEmail: "novo@teste.com" });
+        .send({ novoEmail: "novo@teste.com", senhaAtual: senhaTeste });
 
       expect(respostaOrigemConfigurada.status).toBe(401);
       expect(respostaOrigemConfigurada.body.erro.codigo).toBe("NAO_AUTENTICADO");
@@ -365,8 +790,11 @@ describe("Alteração segura do próprio e-mail", () => {
 
   it.each([
     ["ausente", {}],
-    ["inválido", { novoEmail: "email-invalido" }],
-    ["protegido", { novoEmail: "novo@teste.com", idUsuario: randomUUID() }],
+    ["inválido", { senhaAtual: senhaTeste, novoEmail: "email-invalido" }],
+    [
+      "protegido",
+      { senhaAtual: senhaTeste, novoEmail: "novo@teste.com", idUsuario: randomUUID() },
+    ],
   ])("rejeita corpo %s ao solicitar alteração", async (_caso, corpo) => {
     const usuario = await criarUsuarioTeste();
     const resposta = await request(app)
@@ -376,7 +804,7 @@ describe("Alteração segura do próprio e-mail", () => {
 
     expect(resposta.status).toBe(400);
     expect(resposta.body.erro.codigo).toBe("DADOS_INVALIDOS");
-    expect(tokensEnviados.atual).toBeUndefined();
+    expect(codigosEnviados.atual).toBeUndefined();
   });
 
   it("não altera o e-mail antes das duas confirmações e não aceita mass assignment", async () => {
@@ -386,6 +814,7 @@ describe("Alteração segura do próprio e-mail", () => {
       .set("Authorization", `Bearer ${criarTokenAcesso(usuario.id, usuario.versaoToken)}`)
       .send({
         novoEmail: `${prefixoTeste}mass_${randomUUID()}@teste.com`,
+        senhaAtual: senhaTeste,
         perfil: Perfil.ADMIN,
         senha: "outra-senha",
       });
@@ -410,14 +839,14 @@ describe("Alteração segura do próprio e-mail", () => {
       `${prefixoTeste}propriedade_${randomUUID()}@teste.com`
     );
 
-    const resposta = await confirmarEmailAtual(outroUsuario, tokensEnviados.atual);
+    const resposta = await confirmarEmailAtual(outroUsuario, codigosEnviados.atual);
 
     expect(resposta.status).toBe(400);
-    expect(resposta.body.erro.codigo).toBe("TOKEN_INVALIDO");
-    expect(tokensEnviados.novo).toBeUndefined();
+    expect(resposta.body.erro.codigo).toBe("CODIGO_INVALIDO");
+    expect(codigosEnviados.novo).toBeUndefined();
   });
 
-  it("rejeita token inválido e token de confirmação do e-mail atual no endpoint do novo endereço", async () => {
+  it("rejeita código inválido e código da etapa atual no endpoint do novo endereço", async () => {
     const usuario = await criarUsuarioTeste();
     await solicitarAlteracao(
       usuario.id,
@@ -425,22 +854,19 @@ describe("Alteração segura do próprio e-mail", () => {
       `${prefixoTeste}finalidade_${randomUUID()}@teste.com`
     );
 
-    const tokenInvalido = await confirmarEmailAtual(
-      usuario,
-      "a".repeat(64)
-    );
-    expect(tokenInvalido.status).toBe(400);
-    expect(tokenInvalido.body.erro.codigo).toBe("TOKEN_INVALIDO");
+    const codigoInvalido = await confirmarEmailAtual(usuario, "000000");
+    expect(codigoInvalido.status).toBe(400);
+    expect(codigoInvalido.body.erro.codigo).toBe("CODIGO_INVALIDO");
 
-    const tokenFinalidadeIncorreta = await confirmarNovoEmail(
+    const codigoEtapaIncorreta = await confirmarNovoEmail(
       usuario,
-      tokensEnviados.atual
+      codigosEnviados.atual
     );
-    expect(tokenFinalidadeIncorreta.status).toBe(400);
-    expect(tokenFinalidadeIncorreta.body.erro.codigo).toBe("TOKEN_INVALIDO");
+    expect(codigoEtapaIncorreta.status).toBe(400);
+    expect(codigoEtapaIncorreta.body.erro.codigo).toBe("CODIGO_INVALIDO");
   });
 
-  it("rejeita token pertencente a uma operação de recuperação de senha", async () => {
+  it("rejeita um código sem solicitação de alteração mesmo quando há token de recuperação", async () => {
     const usuario = await criarUsuarioTeste();
     const tokenRecuperacao = randomUUID().replaceAll("-", "").repeat(2);
     await prisma.tokenRecuperacaoSenha.create({
@@ -454,13 +880,13 @@ describe("Alteração segura do próprio e-mail", () => {
     const resposta = await request(app)
       .post("/autenticacao/confirmar-email-atual")
       .set("Authorization", `Bearer ${criarTokenAcesso(usuario.id, usuario.versaoToken)}`)
-      .send({ token: tokenRecuperacao });
+      .send({ codigo: "123456" });
 
     expect(resposta.status).toBe(400);
-    expect(resposta.body.erro.codigo).toBe("TOKEN_INVALIDO");
+    expect(resposta.body.erro.codigo).toBe("CODIGO_INVALIDO");
   });
 
-  it("consome o token do e-mail atual e impede sua reutilização", async () => {
+  it("consome o código do e-mail atual e impede sua reutilização", async () => {
     const usuario = await criarUsuarioTeste();
     await solicitarAlteracao(
       usuario.id,
@@ -473,7 +899,7 @@ describe("Alteração segura do próprio e-mail", () => {
 
     const repeticao = await confirmarEmailAtual(usuario);
     expect(repeticao.status).toBe(400);
-    expect(repeticao.body.erro.codigo).toBe("TOKEN_INVALIDO");
+    expect(repeticao.body.erro.codigo).toBe("CODIGO_INVALIDO");
   });
 
   it("rejeita e invalida token expirado", async () => {
@@ -487,7 +913,7 @@ describe("Alteração segura do próprio e-mail", () => {
     const alteracao = await prisma.alteracaoEmail.findFirst({
       where: {
         idUsuario: usuario.id,
-        tokenEmailAtualHash: gerarHashToken(tokensEnviados.atual!),
+        tokenEmailAtualHash: gerarHashCodigo(codigosEnviados.atual!),
       },
     });
     await prisma.alteracaoEmail.update({
@@ -497,11 +923,11 @@ describe("Alteração segura do próprio e-mail", () => {
 
     const resposta = await confirmarEmailAtual(usuario);
     expect(resposta.status).toBe(400);
-    expect(resposta.body.erro.codigo).toBe("TOKEN_EXPIRADO");
+    expect(resposta.body.erro.codigo).toBe("CODIGO_EXPIRADO");
     const alteracaoExpirada = await prisma.alteracaoEmail.findUnique({
       where: { id: alteracao!.id },
     });
-    expect(alteracaoExpirada?.invalidadaEm).toBeInstanceOf(Date);
+    expect(alteracaoExpirada?.invalidadaEm).toBeNull();
     expect(alteracaoExpirada?.tokenEmailAtualHash).toBeNull();
   });
 
@@ -517,7 +943,7 @@ describe("Alteração segura do próprio e-mail", () => {
     const alteracao = await prisma.alteracaoEmail.findFirst({
       where: {
         idUsuario: usuario.id,
-        tokenEmailNovoHash: gerarHashToken(tokensEnviados.novo!),
+        tokenEmailNovoHash: gerarHashCodigo(codigosEnviados.novo!),
       },
     });
     await prisma.alteracaoEmail.update({
@@ -527,11 +953,11 @@ describe("Alteração segura do próprio e-mail", () => {
 
     const resposta = await confirmarNovoEmail(usuario);
     expect(resposta.status).toBe(400);
-    expect(resposta.body.erro.codigo).toBe("TOKEN_EXPIRADO");
+    expect(resposta.body.erro.codigo).toBe("CODIGO_EXPIRADO");
     const alteracaoExpirada = await prisma.alteracaoEmail.findUnique({
       where: { id: alteracao!.id },
     });
-    expect(alteracaoExpirada?.invalidadaEm).toBeInstanceOf(Date);
+    expect(alteracaoExpirada?.invalidadaEm).toBeNull();
     expect(alteracaoExpirada?.tokenEmailNovoHash).toBeNull();
   });
 
@@ -542,17 +968,17 @@ describe("Alteração segura do próprio e-mail", () => {
       usuario.versaoToken,
       `${prefixoTeste}anterior_${randomUUID()}@teste.com`
     );
-    const tokenAntigo = tokensEnviados.atual!;
+    const codigoAntigo = codigosEnviados.atual!;
 
     const alteracaoAntiga = await prisma.alteracaoEmail.findFirst({
       where: {
         idUsuario: usuario.id,
-        tokenEmailAtualHash: gerarHashToken(tokenAntigo),
+        tokenEmailAtualHash: gerarHashCodigo(codigoAntigo),
       },
     });
     await prisma.alteracaoEmail.update({
       where: { id: alteracaoAntiga!.id },
-      data: { criadoEm: new Date(Date.now() - 61_000) },
+      data: { codigoEnviadoEm: new Date(Date.now() - 61_000) },
     });
 
     const novoEmail = `${prefixoTeste}posterior_${randomUUID()}@teste.com`;
@@ -563,9 +989,9 @@ describe("Alteração segura do próprio e-mail", () => {
     );
     expect(novaSolicitacao.status).toBe(202);
 
-    const tokenAntigoReutilizado = await confirmarEmailAtual(usuario, tokenAntigo);
+    const tokenAntigoReutilizado = await confirmarEmailAtual(usuario, codigoAntigo);
     expect(tokenAntigoReutilizado.status).toBe(400);
-    expect(tokenAntigoReutilizado.body.erro.codigo).toBe("TOKEN_INVALIDO");
+    expect(tokenAntigoReutilizado.body.erro.codigo).toBe("CODIGO_INVALIDO");
 
     const registroAntigoAtualizado = await prisma.alteracaoEmail.findUnique({
       where: { id: alteracaoAntiga!.id },
@@ -584,7 +1010,7 @@ describe("Alteração segura do próprio e-mail", () => {
       usuario.versaoToken,
       primeiroEmailNovo
     );
-    const primeiroToken = tokensEnviados.atual;
+    const primeiroToken = codigosEnviados.atual;
 
     const solicitacaoRepetida = await solicitarAlteracao(
       usuario.id,
@@ -595,7 +1021,7 @@ describe("Alteração segura do próprio e-mail", () => {
     expect(primeiraSolicitacao.status).toBe(202);
     expect(solicitacaoRepetida.status).toBe(202);
     expect(solicitacaoRepetida.body).toEqual(primeiraSolicitacao.body);
-    expect(tokensEnviados.atual).toBe(primeiroToken);
+    expect(codigosEnviados.atual).toBe(primeiroToken);
     expect(
       await prisma.alteracaoEmail.count({ where: { idUsuario: usuario.id } })
     ).toBe(1);
@@ -620,7 +1046,7 @@ describe("Alteração segura do próprio e-mail", () => {
     expect(confirmacaoAtual.status).toBe(409);
     expect(confirmacaoAtual.body.erro.codigo).toBe("ALTERACAO_EMAIL_NAO_CONCLUIDA");
     expect(confirmacaoAtual.body.erro.mensagem).not.toContain(donoDoEmail.email);
-    expect(tokensEnviados.novo).toBeUndefined();
+    expect(codigosEnviados.novo).toBeUndefined();
 
     const usuarioSemAlteracao = await prisma.usuario.findUnique({
       where: { id: usuario.id },
@@ -638,26 +1064,26 @@ describe("Alteração segura do próprio e-mail", () => {
       primeiroUsuario.versaoToken,
       novoEmail
     );
-    const tokenAtualPrimeiro = tokensEnviados.atual!;
+    const tokenAtualPrimeiro = codigosEnviados.atual!;
 
     await solicitarAlteracao(
       segundoUsuario.id,
       segundoUsuario.versaoToken,
       novoEmail
     );
-    const tokenAtualSegundo = tokensEnviados.atual!;
+    const tokenAtualSegundo = codigosEnviados.atual!;
 
     const confirmacaoAtualPrimeiro = await confirmarEmailAtual(
       primeiroUsuario,
       tokenAtualPrimeiro
     );
-    const tokenNovoPrimeiro = tokensEnviados.novo!;
+    const tokenNovoPrimeiro = codigosEnviados.novo!;
 
     const confirmacaoAtualSegundo = await confirmarEmailAtual(
       segundoUsuario,
       tokenAtualSegundo
     );
-    const tokenNovoSegundo = tokensEnviados.novo!;
+    const tokenNovoSegundo = codigosEnviados.novo!;
 
     expect(confirmacaoAtualPrimeiro.status).toBe(200);
     expect(confirmacaoAtualSegundo.status).toBe(200);
@@ -689,7 +1115,7 @@ describe("Alteração segura do próprio e-mail", () => {
     expect(resposta.status).toBe(202);
     expect(resposta.body).not.toHaveProperty("token");
     expect(resposta.body).not.toHaveProperty("tokenHash");
-    expect(JSON.stringify(resposta.body)).not.toContain(tokensEnviados.atual);
+    expect(JSON.stringify(resposta.body)).not.toContain(codigosEnviados.atual);
     expect(JSON.stringify(resposta.body)).not.toContain(usuario.senha);
   });
 
@@ -724,7 +1150,7 @@ describe("Alteração segura do próprio e-mail", () => {
   it("preserva uma solicitação quando o resultado do envio é incerto", async () => {
     const usuario = await criarUsuarioTeste();
     definirInterceptadorAlteracaoEmailTeste(async (parametros) => {
-      tokensEnviados[parametros.etapa] = parametros.token;
+      codigosEnviados[parametros.etapa] = parametros.codigo;
       return { sucesso: false, status: "INCERTO", motivo: "TIMEOUT" };
     });
 
@@ -739,7 +1165,9 @@ describe("Alteração segura do próprio e-mail", () => {
       where: { idUsuario: usuario.id },
     });
     expect(alteracao?.invalidadaEm).toBeNull();
-    expect(alteracao?.tokenEmailAtualHash).toBe(gerarHashToken(tokensEnviados.atual!));
+    expect(alteracao?.tokenEmailAtualHash).toBe(
+      gerarHashCodigo(codigosEnviados.atual!)
+    );
   });
 
   it("invalida a solicitação quando falha o envio da confirmação ao novo endereço", async () => {
@@ -788,7 +1216,7 @@ describe("Alteração segura do próprio e-mail", () => {
     const resultado = await enviarEmailConfirmacaoAlteracaoEmail({
       destinatario: "destino@teste.com",
       nome: "<script>Nome</script>",
-      token: "a".repeat(64),
+      codigo: "123456",
       etapa: "novo",
     });
 
@@ -797,7 +1225,12 @@ describe("Alteração segura do próprio e-mail", () => {
     expect(enviarMensagem).toHaveBeenCalledOnce();
     const mensagem = enviarMensagem.mock.calls[0]?.[0];
     expect(mensagem?.to).toBe("destino@teste.com");
-    expect(mensagem?.text).toContain("a".repeat(64));
+    expect(mensagem?.text).toContain("123456");
+    expect(mensagem?.text).toContain("10 minutos");
+    expect(mensagem?.text).not.toContain("http");
+    expect(mensagem?.html).toContain("123456");
+    expect(mensagem?.html).toContain("10 minutos");
+    expect(mensagem?.html).not.toContain("<a");
     expect(mensagem?.html).not.toContain("<script>");
     expect(mensagem?.html).toContain("&lt;script&gt;");
   });

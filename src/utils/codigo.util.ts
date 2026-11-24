@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { ambiente } from "../config/ambiente.js";
 
 export const DURACAO_CODIGO_MS = 15 * 60 * 1000; // 15 minutos
+export const DURACAO_CODIGO_ALTERACAO_EMAIL_MS = 10 * 60 * 1000; // 10 minutos
 export const INTERVALO_REENVIO_MS = 60 * 1000;  // 60 segundos
 export const MAX_TENTATIVAS_CODIGO = 5;         // 5 tentativas máximas
 

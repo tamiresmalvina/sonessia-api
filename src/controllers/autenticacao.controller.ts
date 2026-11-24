@@ -179,6 +179,27 @@ export async function atualizarNome(
   }
 }
 
+export async function alterarSenha(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.usuario) {
+      throw new AppError(401, "NAO_AUTENTICADO", "Usuário não autenticado.");
+    }
+
+    const resultado = await servicoAutenticacao.alterarSenhaUsuario(
+      req.usuario.id,
+      req.body
+    );
+
+    res.status(200).json(resultado);
+  } catch (erro) {
+    next(erro);
+  }
+}
+
 export async function atualizarDataNascimento(
   req: Request,
   res: Response,
@@ -216,9 +237,67 @@ export async function solicitarAlteracaoEmail(
     const resultado = await servicoAutenticacao.solicitarAlteracaoEmail({
       idUsuario: req.usuario.id,
       dados: req.body,
+      ipSolicitacao: req.ip ?? req.socket.remoteAddress,
     });
 
     res.status(202).json(resultado);
+  } catch (erro) {
+    next(erro);
+  }
+}
+
+export async function obterAlteracaoEmailPendente(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.usuario) {
+      throw new AppError(401, "NAO_AUTENTICADO", "Usuário não autenticado.");
+    }
+
+    const resultado = await servicoAutenticacao.obterAlteracaoEmailPendente(
+      req.usuario.id
+    );
+    res.status(200).json(resultado);
+  } catch (erro) {
+    next(erro);
+  }
+}
+
+export async function reenviarCodigoAlteracaoEmail(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.usuario) {
+      throw new AppError(401, "NAO_AUTENTICADO", "Usuário não autenticado.");
+    }
+
+    const resultado = await servicoAutenticacao.reenviarCodigoAlteracaoEmail(
+      req.usuario.id
+    );
+    res.status(200).json(resultado);
+  } catch (erro) {
+    next(erro);
+  }
+}
+
+export async function cancelarAlteracaoEmail(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.usuario) {
+      throw new AppError(401, "NAO_AUTENTICADO", "Usuário não autenticado.");
+    }
+
+    const resultado = await servicoAutenticacao.cancelarAlteracaoEmail(
+      req.usuario.id
+    );
+    res.status(200).json(resultado);
   } catch (erro) {
     next(erro);
   }

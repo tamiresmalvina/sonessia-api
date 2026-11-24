@@ -19,6 +19,7 @@ import {
   gerarHashCodigo,
   compararCodigoHash,
   DURACAO_CODIGO_MS,
+  DURACAO_CODIGO_ALTERACAO_EMAIL_MS,
   INTERVALO_REENVIO_MS,
   MAX_TENTATIVAS_CODIGO,
 } from "../utils/codigo.util.js";
@@ -26,6 +27,7 @@ import {
   enviarEmailVerificacao,
   enviarEmailRecuperacaoSenha,
   enviarEmailConfirmacaoAlteracaoEmail,
+  enviarNotificacaoAlteracaoEmailConcluida,
   type ResultadoEnvioEmail,
 } from "../utils/email.util.js";
 import type {
@@ -37,6 +39,7 @@ import type {
   EntradaAtualizarDataNascimento,
   EntradaSolicitarAlteracaoEmail,
   EntradaConfirmarAlteracaoEmail,
+  EntradaAlterarSenha,
   EntradaReativarConta,
 } from "../schemas/autenticacao.schema.js";
 import type { UsuarioAutenticado } from "../types/express.js";
@@ -473,6 +476,78 @@ export async function atualizarNomeUsuario(
   });
 }
 
+export async function alterarSenhaUsuario(
+  idUsuario: string,
+  dados: EntradaAlterarSenha
+): Promise<{ mensagem: string }> {
+  const usuario = await prisma.usuario.findUnique({
+    where: { id: idUsuario },
+    select: { senha: true },
+  });
+
+  if (!usuario) {
+    throw new AppError(401, "USUARIO_NAO_ENCONTRADO", "Usuário autenticado não encontrado.");
+  }
+
+  if (!(await verificarSenha(usuario.senha, dados.senhaAtual))) {
+    throw new AppError(401, "SENHA_ATUAL_INVALIDA", "A senha atual está incorreta.");
+  }
+
+  if (await verificarSenha(usuario.senha, dados.novaSenha)) {
+    throw new AppError(
+      400,
+      "NOVA_SENHA_IGUAL_ATUAL",
+      "A nova senha deve ser diferente da senha atual."
+    );
+  }
+
+  const novoHashSenha = await gerarHashSenha(dados.novaSenha);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT id FROM "Usuario" WHERE id = ${idUsuario}::uuid FOR UPDATE
+    `;
+
+    const usuarioAtual = await tx.usuario.findUnique({
+      where: { id: idUsuario },
+      select: { senha: true },
+    });
+
+    if (!usuarioAtual) {
+      throw new AppError(401, "USUARIO_NAO_ENCONTRADO", "Usuário autenticado não encontrado.");
+    }
+
+    if (usuarioAtual.senha !== usuario.senha) {
+      throw new AppError(
+        409,
+        "CREDENCIAIS_ALTERADAS",
+        "As credenciais foram alteradas durante a operação. Faça login novamente."
+      );
+    }
+
+    await tx.usuario.update({
+      where: { id: idUsuario },
+      data: {
+        senha: novoHashSenha,
+        versaoToken: { increment: 1 },
+        senhaAlteradaEm: new Date(),
+      },
+    });
+
+    await tx.sessao.updateMany({
+      where: {
+        idUsuario,
+        status: StatusSessao.ATIVA,
+      },
+      data: { status: StatusSessao.REVOGADA },
+    });
+  });
+
+  return {
+    mensagem: "Senha alterada com sucesso. Faça login novamente.",
+  };
+}
+
 export async function atualizarDataNascimentoUsuario(
   idUsuario: string,
   dados: EntradaAtualizarDataNascimento
@@ -492,11 +567,12 @@ export async function atualizarDataNascimentoUsuario(
 
 const MENSAGEM_NEUTRA_ALTERACAO_EMAIL =
   "Se a solicitação puder ser processada, as instruções serão enviadas ao e-mail atual.";
-const DURACAO_ALTERACAO_EMAIL_MS = DURACAO_TOKEN_RECUPERACAO_MS;
+const MAX_REENVIOS_CODIGO_ALTERACAO_EMAIL = 3;
 
 interface ParametrosSolicitarAlteracaoEmail {
   idUsuario: string;
   dados: EntradaSolicitarAlteracaoEmail;
+  ipSolicitacao: string | undefined;
 }
 
 interface ParametrosConfirmarAlteracaoEmail extends EntradaConfirmarAlteracaoEmail {
@@ -556,11 +632,15 @@ export async function solicitarAlteracaoEmail(
 
     const usuario = await tx.usuario.findUnique({
       where: { id: parametros.idUsuario },
-      select: { id: true, nome: true, email: true },
+      select: { id: true, nome: true, email: true, senha: true },
     });
 
     if (!usuario) {
       throw new AppError(401, "USUARIO_NAO_ENCONTRADO", "Usuário autenticado não encontrado.");
+    }
+
+    if (!(await verificarSenha(usuario.senha, parametros.dados.senhaAtual))) {
+      throw new AppError(401, "SENHA_ATUAL_INVALIDA", "A senha atual está incorreta.");
     }
 
     if (parametros.dados.novoEmail === usuario.email.toLowerCase()) {
@@ -572,14 +652,19 @@ export async function solicitarAlteracaoEmail(
     }
 
     const solicitacaoMaisRecente = await tx.alteracaoEmail.findFirst({
-      where: { idUsuario: usuario.id },
+      where: {
+        idUsuario: usuario.id,
+        concluidaEm: null,
+        invalidadaEm: null,
+      },
       orderBy: { criadoEm: "desc" },
-      select: { criadoEm: true },
+      select: { codigoEnviadoEm: true },
     });
 
     if (
-      solicitacaoMaisRecente &&
-      Date.now() - solicitacaoMaisRecente.criadoEm.getTime() < INTERVALO_REENVIO_MS
+      solicitacaoMaisRecente?.codigoEnviadoEm &&
+      Date.now() - solicitacaoMaisRecente.codigoEnviadoEm.getTime() <
+        INTERVALO_REENVIO_MS
     ) {
       return { aguardando: true as const };
     }
@@ -597,14 +682,19 @@ export async function solicitarAlteracaoEmail(
       },
     });
 
-    const token = gerarTokenRecuperacao();
+    const codigo = gerarCodigoNumerico();
+    const enviadoEm = new Date();
     const alteracao = await tx.alteracaoEmail.create({
       data: {
         idUsuario: usuario.id,
         emailAtual: usuario.email,
         emailNovo: parametros.dados.novoEmail,
-        tokenEmailAtualHash: gerarHashToken(token),
-        expiraEm: new Date(Date.now() + DURACAO_ALTERACAO_EMAIL_MS),
+        tokenEmailAtualHash: gerarHashCodigo(codigo),
+        ipSolicitacao: parametros.ipSolicitacao ?? null,
+        expiraEm: new Date(enviadoEm.getTime() + DURACAO_CODIGO_ALTERACAO_EMAIL_MS),
+        codigoEnviadoEm: enviadoEm,
+        tentativasCodigo: 0,
+        reenviosCodigo: 0,
       },
       select: { id: true },
     });
@@ -612,7 +702,7 @@ export async function solicitarAlteracaoEmail(
     return {
       aguardando: false as const,
       idAlteracao: alteracao.id,
-      token,
+      codigo,
       destinatario: usuario.email,
       nome: usuario.nome,
     };
@@ -625,7 +715,7 @@ export async function solicitarAlteracaoEmail(
   const envio = await enviarEmailConfirmacaoAlteracaoEmail({
     destinatario: resultado.destinatario,
     nome: resultado.nome,
-    token: resultado.token,
+    codigo: resultado.codigo,
     etapa: "atual",
   });
   await tratarFalhaEnvioAlteracaoEmail(resultado.idAlteracao, envio);
@@ -633,44 +723,42 @@ export async function solicitarAlteracaoEmail(
   return { mensagem: MENSAGEM_NEUTRA_ALTERACAO_EMAIL };
 }
 
-export async function confirmarEmailAtual(
-  parametros: ParametrosConfirmarAlteracaoEmail
-): Promise<{ mensagem: string }> {
-  const tokenHash = gerarHashToken(parametros.token);
-  const registroEncontrado = await prisma.alteracaoEmail.findUnique({
-    where: { tokenEmailAtualHash: tokenHash },
-    select: { id: true, idUsuario: true },
-  });
-
-  if (!registroEncontrado || registroEncontrado.idUsuario !== parametros.idUsuario) {
-    throw new AppError(400, "TOKEN_INVALIDO", "Token de confirmação inválido ou expirado.");
-  }
-
-  const resultado = await prisma.$transaction(async (tx) => {
+export async function obterAlteracaoEmailPendente(idUsuario: string): Promise<{
+  solicitacaoPendente: {
+    novoEmail: string;
+    etapa: "CONFIRMAR_EMAIL_ATUAL" | "CONFIRMAR_NOVO_EMAIL";
+    expiraEm: string;
+    solicitadaEm: string;
+    codigoEnviadoEm: string;
+    reenvioDisponivelEm: string;
+    reenviosRestantes: number;
+  } | null;
+}> {
+  return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`
-      SELECT id FROM "Usuario" WHERE id = ${parametros.idUsuario}::uuid FOR UPDATE
-    `;
-    await tx.$queryRaw`
-      SELECT id FROM "AlteracaoEmail" WHERE id = ${registroEncontrado.id}::uuid FOR UPDATE
+      SELECT id FROM "Usuario" WHERE id = ${idUsuario}::uuid FOR UPDATE
     `;
 
-    const alteracao = await tx.alteracaoEmail.findUnique({
-      where: { id: registroEncontrado.id },
-    });
-    const usuario = await tx.usuario.findUnique({
-      where: { id: parametros.idUsuario },
-      select: { email: true, nome: true },
+    const alteracao = await tx.alteracaoEmail.findFirst({
+      where: {
+        idUsuario,
+        concluidaEm: null,
+        invalidadaEm: null,
+      },
+      orderBy: { criadoEm: "desc" },
+      select: {
+        id: true,
+        emailNovo: true,
+        emailAtualConfirmadoEm: true,
+        expiraEm: true,
+        criadoEm: true,
+        codigoEnviadoEm: true,
+        reenviosCodigo: true,
+      },
     });
 
-    if (
-      !alteracao ||
-      !usuario ||
-      alteracao.idUsuario !== parametros.idUsuario ||
-      alteracao.tokenEmailAtualHash !== tokenHash ||
-      alteracao.concluidaEm ||
-      alteracao.invalidadaEm
-    ) {
-      throw new AppError(400, "TOKEN_INVALIDO", "Token de confirmação inválido ou expirado.");
+    if (!alteracao) {
+      return { solicitacaoPendente: null };
     }
 
     if (alteracao.expiraEm <= new Date()) {
@@ -679,14 +767,242 @@ export async function confirmarEmailAtual(
         data: {
           tokenEmailAtualHash: null,
           tokenEmailNovoHash: null,
-          invalidadaEm: new Date(),
         },
+      });
+    }
+
+    const codigoEnviadoEm = alteracao.codigoEnviadoEm ?? alteracao.criadoEm;
+    return {
+      solicitacaoPendente: {
+        novoEmail: alteracao.emailNovo,
+        etapa: alteracao.emailAtualConfirmadoEm
+          ? "CONFIRMAR_NOVO_EMAIL"
+          : "CONFIRMAR_EMAIL_ATUAL",
+        expiraEm: alteracao.expiraEm.toISOString(),
+        solicitadaEm: alteracao.criadoEm.toISOString(),
+        codigoEnviadoEm: codigoEnviadoEm.toISOString(),
+        reenvioDisponivelEm: new Date(
+          codigoEnviadoEm.getTime() + INTERVALO_REENVIO_MS
+        ).toISOString(),
+        reenviosRestantes: Math.max(
+          0,
+          MAX_REENVIOS_CODIGO_ALTERACAO_EMAIL - alteracao.reenviosCodigo
+        ),
+      },
+    };
+  });
+}
+
+export async function reenviarCodigoAlteracaoEmail(
+  idUsuario: string
+): Promise<{ mensagem: string }> {
+  const resultado = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT id FROM "Usuario" WHERE id = ${idUsuario}::uuid FOR UPDATE
+    `;
+
+    const [usuario, alteracao] = await Promise.all([
+      tx.usuario.findUnique({
+        where: { id: idUsuario },
+        select: { email: true, nome: true },
+      }),
+      tx.alteracaoEmail.findFirst({
+        where: {
+          idUsuario,
+          concluidaEm: null,
+          invalidadaEm: null,
+        },
+        orderBy: { criadoEm: "desc" },
+      }),
+    ]);
+
+    if (!usuario || !alteracao || usuario.email !== alteracao.emailAtual) {
+      throw new AppError(
+        404,
+        "ALTERACAO_EMAIL_NAO_ENCONTRADA",
+        "Não há solicitação pendente para reenviar o código."
+      );
+    }
+
+    if (alteracao.reenviosCodigo >= MAX_REENVIOS_CODIGO_ALTERACAO_EMAIL) {
+      throw new AppError(
+        429,
+        "LIMITE_REENVIO_CODIGO",
+        "O limite de reenvios para esta etapa foi atingido."
+      );
+    }
+
+    const agora = new Date();
+    if (
+      alteracao.codigoEnviadoEm &&
+      agora.getTime() - alteracao.codigoEnviadoEm.getTime() <
+        INTERVALO_REENVIO_MS
+    ) {
+      throw new AppError(
+        429,
+        "REENVIO_CODIGO_AGUARDE",
+        "Aguarde 60 segundos antes de solicitar outro código."
+      );
+    }
+
+    const etapa: "novo" | "atual" = alteracao.emailAtualConfirmadoEm
+      ? "novo"
+      : "atual";
+    const hashAnterior =
+      etapa === "atual"
+        ? alteracao.tokenEmailAtualHash
+        : alteracao.tokenEmailNovoHash;
+    let codigo = gerarCodigoNumerico();
+    let hashCodigo = gerarHashCodigo(codigo);
+    while (hashAnterior && hashCodigo === hashAnterior) {
+      codigo = gerarCodigoNumerico();
+      hashCodigo = gerarHashCodigo(codigo);
+    }
+
+    await tx.alteracaoEmail.update({
+      where: { id: alteracao.id },
+      data: {
+        tokenEmailAtualHash: etapa === "atual" ? hashCodigo : null,
+        tokenEmailNovoHash: etapa === "novo" ? hashCodigo : null,
+        expiraEm: new Date(agora.getTime() + DURACAO_CODIGO_ALTERACAO_EMAIL_MS),
+        codigoEnviadoEm: agora,
+        tentativasCodigo: 0,
+        reenviosCodigo: { increment: 1 },
+      },
+    });
+
+    return {
+      idAlteracao: alteracao.id,
+      codigo,
+      destinatario: etapa === "atual" ? usuario.email : alteracao.emailNovo,
+      nome: usuario.nome,
+      etapa,
+    };
+  });
+
+  const envio = await enviarEmailConfirmacaoAlteracaoEmail({
+    destinatario: resultado.destinatario,
+    nome: resultado.nome,
+    codigo: resultado.codigo,
+    etapa: resultado.etapa,
+  });
+  await tratarFalhaEnvioAlteracaoEmail(resultado.idAlteracao, envio);
+
+  return { mensagem: "Um novo código de confirmação foi enviado." };
+}
+
+export async function cancelarAlteracaoEmail(
+  idUsuario: string
+): Promise<{ mensagem: string }> {
+  const cancelada = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT id FROM "Usuario" WHERE id = ${idUsuario}::uuid FOR UPDATE
+    `;
+
+    const alteracao = await tx.alteracaoEmail.findFirst({
+      where: {
+        idUsuario,
+        concluidaEm: null,
+        invalidadaEm: null,
+      },
+      orderBy: { criadoEm: "desc" },
+      select: { id: true },
+    });
+
+    if (!alteracao) {
+      return false;
+    }
+
+    await tx.alteracaoEmail.update({
+      where: { id: alteracao.id },
+      data: {
+        tokenEmailAtualHash: null,
+        tokenEmailNovoHash: null,
+        invalidadaEm: new Date(),
+      },
+    });
+
+    return true;
+  });
+
+  if (!cancelada) {
+    throw new AppError(
+      404,
+      "ALTERACAO_EMAIL_NAO_ENCONTRADA",
+      "Não há solicitação pendente para cancelar."
+    );
+  }
+
+  return { mensagem: "Solicitação de alteração de e-mail cancelada com sucesso." };
+}
+
+export async function confirmarEmailAtual(
+  parametros: ParametrosConfirmarAlteracaoEmail
+): Promise<{ mensagem: string }> {
+  const resultado = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`
+      SELECT id FROM "Usuario" WHERE id = ${parametros.idUsuario}::uuid FOR UPDATE
+    `;
+
+    const [alteracao, usuario] = await Promise.all([
+      tx.alteracaoEmail.findFirst({
+        where: {
+          idUsuario: parametros.idUsuario,
+          concluidaEm: null,
+          invalidadaEm: null,
+        },
+        orderBy: { criadoEm: "desc" },
+      }),
+      tx.usuario.findUnique({
+        where: { id: parametros.idUsuario },
+        select: { email: true, nome: true },
+      }),
+    ]);
+
+    if (
+      !alteracao ||
+      !usuario ||
+      alteracao.emailAtualConfirmadoEm ||
+      usuario.email !== alteracao.emailAtual
+    ) {
+      return { situacao: "CODIGO_INVALIDO" as const };
+    }
+
+    if (alteracao.expiraEm <= new Date()) {
+      await tx.alteracaoEmail.update({
+        where: { id: alteracao.id },
+        data: { tokenEmailAtualHash: null },
       });
       return { situacao: "EXPIRADO" as const };
     }
 
-    if (usuario.email !== alteracao.emailAtual) {
-      throw new AppError(400, "TOKEN_INVALIDO", "Token de confirmação inválido ou expirado.");
+    const hashCodigo = alteracao.tokenEmailAtualHash;
+    if (!hashCodigo) {
+      return {
+        situacao:
+          alteracao.tentativasCodigo >= MAX_TENTATIVAS_CODIGO
+            ? ("LIMITE_TENTATIVAS" as const)
+            : ("CODIGO_INVALIDO" as const),
+      };
+    }
+
+    if (!compararCodigoHash(parametros.codigo, hashCodigo)) {
+      const tentativas = alteracao.tentativasCodigo + 1;
+      await tx.alteracaoEmail.update({
+        where: { id: alteracao.id },
+        data: {
+          tentativasCodigo: tentativas,
+          ...(tentativas >= MAX_TENTATIVAS_CODIGO
+            ? { tokenEmailAtualHash: null }
+            : {}),
+        },
+      });
+      return {
+        situacao:
+          tentativas >= MAX_TENTATIVAS_CODIGO
+            ? ("LIMITE_TENTATIVAS" as const)
+            : ("CODIGO_INVALIDO" as const),
+      };
     }
 
     const emailExistente = await tx.usuario.findUnique({
@@ -705,20 +1021,32 @@ export async function confirmarEmailAtual(
       return { situacao: "EMAIL_INDISPONIVEL" as const };
     }
 
-    const tokenNovo = gerarTokenRecuperacao();
+    let codigoNovo = gerarCodigoNumerico();
+    let hashNovo = gerarHashCodigo(codigoNovo);
+    while (hashNovo === hashCodigo) {
+      codigoNovo = gerarCodigoNumerico();
+      hashNovo = gerarHashCodigo(codigoNovo);
+    }
+    const enviadoEm = new Date();
     await tx.alteracaoEmail.update({
       where: { id: alteracao.id },
       data: {
         tokenEmailAtualHash: null,
-        tokenEmailNovoHash: gerarHashToken(tokenNovo),
-        emailAtualConfirmadoEm: new Date(),
+        tokenEmailNovoHash: hashNovo,
+        emailAtualConfirmadoEm: enviadoEm,
+        expiraEm: new Date(
+          enviadoEm.getTime() + DURACAO_CODIGO_ALTERACAO_EMAIL_MS
+        ),
+        codigoEnviadoEm: enviadoEm,
+        tentativasCodigo: 0,
+        reenviosCodigo: 0,
       },
     });
 
     return {
       situacao: "AGUARDANDO_CONFIRMACAO_NOVO" as const,
       idAlteracao: alteracao.id,
-      token: tokenNovo,
+      codigo: codigoNovo,
       destinatario: alteracao.emailNovo,
       nome: usuario.nome,
     };
@@ -732,14 +1060,30 @@ export async function confirmarEmailAtual(
     );
   }
 
+  if (resultado.situacao === "CODIGO_INVALIDO") {
+    throw new AppError(400, "CODIGO_INVALIDO", "Código de confirmação inválido.");
+  }
+
+  if (resultado.situacao === "LIMITE_TENTATIVAS") {
+    throw new AppError(
+      429,
+      "LIMITE_TENTATIVAS_CODIGO",
+      "O limite de tentativas foi atingido. Solicite um novo código."
+    );
+  }
+
   if (resultado.situacao === "EXPIRADO") {
-    throw new AppError(400, "TOKEN_EXPIRADO", "Token de confirmação expirado.");
+    throw new AppError(400, "CODIGO_EXPIRADO", "Código de confirmação expirado.");
+  }
+
+  if (resultado.situacao !== "AGUARDANDO_CONFIRMACAO_NOVO") {
+    throw new AppError(400, "CODIGO_INVALIDO", "Código de confirmação inválido.");
   }
 
   const envio = await enviarEmailConfirmacaoAlteracaoEmail({
     destinatario: resultado.destinatario,
     nome: resultado.nome,
-    token: resultado.token,
+    codigo: resultado.codigo,
     etapa: "novo",
   });
   await tratarFalhaEnvioAlteracaoEmail(resultado.idAlteracao, envio);
@@ -750,59 +1094,76 @@ export async function confirmarEmailAtual(
 export async function confirmarNovoEmail(
   parametros: ParametrosConfirmarAlteracaoEmail
 ): Promise<{ mensagem: string }> {
-  const tokenHash = gerarHashToken(parametros.token);
-  const registroEncontrado = await prisma.alteracaoEmail.findUnique({
-    where: { tokenEmailNovoHash: tokenHash },
-    select: { id: true, idUsuario: true },
-  });
-
-  if (!registroEncontrado || registroEncontrado.idUsuario !== parametros.idUsuario) {
-    throw new AppError(400, "TOKEN_INVALIDO", "Token de confirmação inválido ou expirado.");
-  }
-
+  let idAlteracaoPendente: string | undefined;
   try {
     const resultado = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`
         SELECT id FROM "Usuario" WHERE id = ${parametros.idUsuario}::uuid FOR UPDATE
       `;
-      await tx.$queryRaw`
-        SELECT id FROM "AlteracaoEmail" WHERE id = ${registroEncontrado.id}::uuid FOR UPDATE
-      `;
 
-      const alteracao = await tx.alteracaoEmail.findUnique({
-        where: { id: registroEncontrado.id },
-      });
-      const usuario = await tx.usuario.findUnique({
-        where: { id: parametros.idUsuario },
-        select: { email: true },
-      });
+      const [alteracao, usuario] = await Promise.all([
+        tx.alteracaoEmail.findFirst({
+          where: {
+            idUsuario: parametros.idUsuario,
+            concluidaEm: null,
+            invalidadaEm: null,
+          },
+          orderBy: { criadoEm: "desc" },
+        }),
+        tx.usuario.findUnique({
+          where: { id: parametros.idUsuario },
+          select: { email: true, nome: true },
+        }),
+      ]);
+
+      if (alteracao) {
+        idAlteracaoPendente = alteracao.id;
+      }
 
       if (
         !alteracao ||
         !usuario ||
-        alteracao.idUsuario !== parametros.idUsuario ||
-        alteracao.tokenEmailNovoHash !== tokenHash ||
         !alteracao.emailAtualConfirmadoEm ||
-        alteracao.concluidaEm ||
-        alteracao.invalidadaEm
+        usuario.email !== alteracao.emailAtual
       ) {
-        throw new AppError(400, "TOKEN_INVALIDO", "Token de confirmação inválido ou expirado.");
+        return { situacao: "CODIGO_INVALIDO" as const };
       }
 
       if (alteracao.expiraEm <= new Date()) {
         await tx.alteracaoEmail.update({
           where: { id: alteracao.id },
-          data: {
-            tokenEmailAtualHash: null,
-            tokenEmailNovoHash: null,
-            invalidadaEm: new Date(),
-          },
+          data: { tokenEmailNovoHash: null },
         });
         return { situacao: "EXPIRADO" as const };
       }
 
-      if (usuario.email !== alteracao.emailAtual) {
-        throw new AppError(400, "TOKEN_INVALIDO", "Token de confirmação inválido ou expirado.");
+      const hashCodigo = alteracao.tokenEmailNovoHash;
+      if (!hashCodigo) {
+        return {
+          situacao:
+            alteracao.tentativasCodigo >= MAX_TENTATIVAS_CODIGO
+              ? ("LIMITE_TENTATIVAS" as const)
+              : ("CODIGO_INVALIDO" as const),
+        };
+      }
+
+      if (!compararCodigoHash(parametros.codigo, hashCodigo)) {
+        const tentativas = alteracao.tentativasCodigo + 1;
+        await tx.alteracaoEmail.update({
+          where: { id: alteracao.id },
+          data: {
+            tentativasCodigo: tentativas,
+            ...(tentativas >= MAX_TENTATIVAS_CODIGO
+              ? { tokenEmailNovoHash: null }
+              : {}),
+          },
+        });
+        return {
+          situacao:
+            tentativas >= MAX_TENTATIVAS_CODIGO
+              ? ("LIMITE_TENTATIVAS" as const)
+              : ("CODIGO_INVALIDO" as const),
+        };
       }
 
       const emailExistente = await tx.usuario.findUnique({
@@ -873,6 +1234,9 @@ export async function confirmarNovoEmail(
 
       return {
         situacao: "CONCLUIDO" as const,
+        emailAntigo: alteracao.emailAtual,
+        emailNovo: alteracao.emailNovo,
+        nome: usuario.nome,
       };
     });
 
@@ -884,12 +1248,49 @@ export async function confirmarNovoEmail(
       );
     }
 
+    if (resultado.situacao === "CODIGO_INVALIDO") {
+      throw new AppError(400, "CODIGO_INVALIDO", "Código de confirmação inválido.");
+    }
+
+    if (resultado.situacao === "LIMITE_TENTATIVAS") {
+      throw new AppError(
+        429,
+        "LIMITE_TENTATIVAS_CODIGO",
+        "O limite de tentativas foi atingido. Solicite um novo código."
+      );
+    }
+
     if (resultado.situacao === "EXPIRADO") {
-      throw new AppError(400, "TOKEN_EXPIRADO", "Token de confirmação expirado.");
+      throw new AppError(400, "CODIGO_EXPIRADO", "Código de confirmação expirado.");
+    }
+
+    if (resultado.situacao !== "CONCLUIDO") {
+      throw new AppError(400, "CODIGO_INVALIDO", "Código de confirmação inválido.");
+    }
+
+    const resultadosNotificacao = await Promise.all([
+      enviarNotificacaoAlteracaoEmailConcluida({
+        destinatario: resultado.emailAntigo,
+        nome: resultado.nome,
+      }),
+      enviarNotificacaoAlteracaoEmailConcluida({
+        destinatario: resultado.emailNovo,
+        nome: resultado.nome,
+      }),
+    ]);
+
+    if (resultadosNotificacao.some((envio) => !envio.sucesso)) {
+      throw new AppError(
+        502,
+        "FALHA_NOTIFICACAO_ALTERACAO_EMAIL",
+        "O e-mail foi alterado, mas não foi possível confirmar o envio das notificações."
+      );
     }
   } catch (erro) {
     if (erroPrismaUnicidade(erro)) {
-      await invalidarAlteracaoEmail(registroEncontrado.id);
+      if (idAlteracaoPendente) {
+        await invalidarAlteracaoEmail(idAlteracaoPendente);
+      }
       throw new AppError(
         409,
         "ALTERACAO_EMAIL_NAO_CONCLUIDA",

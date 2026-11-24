@@ -64,6 +64,28 @@ export const limiteConfirmarAlteracaoEmail = rateLimit({
   },
 });
 
+export const limiteReenviarCodigoAlteracaoEmail = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 6,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => ambiente.NODE_ENV === "test",
+  handler: (_req, res) => {
+    res.status(429).json(respostaPadraoRateLimit);
+  },
+});
+
+export const limiteCancelarAlteracaoEmail = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => ambiente.NODE_ENV === "test",
+  handler: (_req, res) => {
+    res.status(429).json(respostaPadraoRateLimit);
+  },
+});
+
 export const limiteExclusaoConta = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
@@ -122,6 +144,17 @@ export const limiteSolicitacaoRecuperacao = rateLimit({
 export const limiteRedefinicaoSenha = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => ambiente.NODE_ENV === "test",
+  handler: (_req, res) => {
+    res.status(429).json(respostaPadraoRateLimit);
+  },
+});
+
+export const limiteAlteracaoSenha = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
   standardHeaders: true,
   legacyHeaders: false,
   skip: () => ambiente.NODE_ENV === "test",

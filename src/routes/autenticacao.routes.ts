@@ -13,8 +13,11 @@ import {
   limiteRenovacaoSessao,
   limiteSolicitacaoRecuperacao,
   limiteRedefinicaoSenha,
+  limiteAlteracaoSenha,
   limiteSolicitarAlteracaoEmail,
   limiteConfirmarAlteracaoEmail,
+  limiteReenviarCodigoAlteracaoEmail,
+  limiteCancelarAlteracaoEmail,
   limiteExclusaoConta,
   limiteReativacaoConta,
   limiteUploadFotoPerfil,
@@ -30,8 +33,10 @@ import {
   schemaAtualizarDataNascimento,
   schemaSolicitarAlteracaoEmail,
   schemaConfirmarAlteracaoEmail,
+  schemaReenviarCodigoAlteracaoEmail,
   schemaSolicitarRecuperacaoSenha,
   schemaRedefinirSenha,
+  schemaAlterarSenha,
   schemaSolicitarExclusaoConta,
   schemaReativarConta,
 } from "../schemas/autenticacao.schema.js";
@@ -129,6 +134,15 @@ rotasAutenticacao.patch(
 );
 
 rotasAutenticacao.patch(
+  "/eu/senha",
+  limiteAlteracaoSenha,
+  validarOrigemMutacao,
+  autenticar,
+  validarCorpo(schemaAlterarSenha),
+  controladorAutenticacao.alterarSenha
+);
+
+rotasAutenticacao.patch(
   "/eu/data-nascimento",
   autenticar,
   validarCorpo(schemaAtualizarDataNascimento),
@@ -142,6 +156,29 @@ rotasAutenticacao.post(
   validarCorpo(schemaSolicitarAlteracaoEmail),
   autenticar,
   controladorAutenticacao.solicitarAlteracaoEmail
+);
+
+rotasAutenticacao.get(
+  "/eu/alteracao-email",
+  autenticar,
+  controladorAutenticacao.obterAlteracaoEmailPendente
+);
+
+rotasAutenticacao.post(
+  "/eu/alteracao-email/reenviar-codigo",
+  limiteReenviarCodigoAlteracaoEmail,
+  validarOrigemMutacao,
+  validarCorpo(schemaReenviarCodigoAlteracaoEmail),
+  autenticar,
+  controladorAutenticacao.reenviarCodigoAlteracaoEmail
+);
+
+rotasAutenticacao.delete(
+  "/eu/alteracao-email",
+  limiteCancelarAlteracaoEmail,
+  validarOrigemMutacao,
+  autenticar,
+  controladorAutenticacao.cancelarAlteracaoEmail
 );
 
 rotasAutenticacao.post(

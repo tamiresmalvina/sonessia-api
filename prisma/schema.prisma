@@ -39,7 +39,7 @@ model Categoria {
   tipo            TipoCategoria
   ativa           Boolean       @default(true)
   dataCriacao     DateTime      @default(now())
-  dataAtualizacao DateTime      @updatedAt
+  dataAtualizacao DateTime      @default(now()) @updatedAt
 
   audios           Audio[]
   ambientesSonoros AmbienteSonoro[]
@@ -81,10 +81,14 @@ model AlteracaoEmail {
   idUsuario              String    @db.Uuid
   emailAtual             String
   emailNovo              String
-  tokenEmailAtualHash    String?   @unique
-  tokenEmailNovoHash     String?   @unique
+  tokenEmailAtualHash    String?
+  tokenEmailNovoHash     String?
+  ipSolicitacao          String?   @db.VarChar(45)
   expiraEm               DateTime
   emailAtualConfirmadoEm DateTime?
+  tentativasCodigo       Int       @default(0)
+  reenviosCodigo         Int       @default(0)
+  codigoEnviadoEm        DateTime?
   concluidaEm            DateTime?
   invalidadaEm           DateTime?
   criadoEm               DateTime  @default(now())

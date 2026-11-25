@@ -8,6 +8,7 @@ import { rotasAudios } from "./routes/audios.routes.js";
 import { rotasAmbientesSonoros } from "./routes/ambientes-sonoros.routes.js";
 import { rotasColecoes } from "./routes/colecoes.routes.js";
 import { rotasCategorias } from "./routes/categorias.routes.js";
+import { rotasHistoricoReproducao } from "./routes/historico-reproducao.routes.js";
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use("/ambientes-sonoros", rotasAmbientesSonoros);
 app.use("/ambientes", rotasAmbientesSonoros);
 app.use("/colecoes", rotasColecoes);
 app.use("/categorias", rotasCategorias);
+app.use("/historico-reproducoes", rotasHistoricoReproducao);
 
 app.use((_req, res) => {
   res.status(404).json({

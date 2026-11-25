@@ -72,6 +72,7 @@ model Usuario {
   sessoes                Sessao[]
   tokensRecuperacaoSenha TokenRecuperacaoSenha[]
   alteracoesEmail        AlteracaoEmail[]
+  historicoReproducoes   HistoricoReproducaoAmbiente[]
 
   @@index([exclusaoDefinitivaEm])
 }
@@ -175,6 +176,7 @@ model AmbienteSonoro {
 
   colecoes ColecaoAmbienteSonoro[]
   audios   AmbienteSonoroAudio[]
+  historicoReproducoes HistoricoReproducaoAmbiente[]
 
   @@index([origem, publicado])
   @@index([finalidade, publicado])
@@ -221,4 +223,19 @@ model AmbienteSonoroAudio {
   audio          Audio          @relation(fields: [idAudio], references: [idAudio])
 
   @@id([idAmbienteSonoro, idAudio])
+}
+
+model HistoricoReproducaoAmbiente {
+  id               String   @id @default(uuid()) @db.Uuid
+  idUsuario        String   @db.Uuid
+  idAmbienteSonoro String   @db.Uuid
+  ultimaReproducao DateTime @default(now())
+  criadoEm         DateTime @default(now())
+  atualizadoEm     DateTime @updatedAt
+
+  usuario        Usuario        @relation(fields: [idUsuario], references: [id], onDelete: Cascade)
+  ambienteSonoro AmbienteSonoro @relation(fields: [idAmbienteSonoro], references: [idAmbienteSonoro], onDelete: Cascade)
+
+  @@unique([idUsuario, idAmbienteSonoro])
+  @@index([idUsuario, ultimaReproducao(sort: Desc)])
 }

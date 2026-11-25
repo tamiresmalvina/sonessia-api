@@ -164,53 +164,70 @@ async function verificarAudiosExistentes(itens: ItemComposicaoAudio[]): Promise<
 /* AMBIENTES PERSONALIZADOS (US05 - Privados, exclusivos do usuário)         */
 /* ========================================================================= */
 
-export async function criarAmbienteSonoro(idUsuario: string, dadosBrutos: unknown) {
+export async function criarAmbienteSonoro(
+  idUsuario: string,
+  dadosBrutos: unknown,
+  arquivoImagem?: ArquivoImagemAmbienteRecebido,
+) {
   const dados: EntradaCriarAmbienteSonoro = schemaCriarAmbienteSonoro.parse(dadosBrutos);
   if (dados.idCategoria) await exigirCategoriaAtiva(dados.idCategoria, "AMBIENTE");
   await verificarAudiosExistentes(dados.audios);
 
-  const ambienteCriado = await prisma.$transaction(async (tx) => {
-    const ambiente = await tx.ambienteSonoro.create({
-      data: {
-        idUsuario,
-        nome: dados.nome,
-        descricao: dados.descricao ?? null,
-        finalidade: dados.finalidade,
-        origem: ORIGEM_PERSONALIZADO,
-        idCategoria: dados.idCategoria ?? null,
-        publicado: false,
-      },
-    });
+  let imagemRemota: { imagem: string; imagemPublicId: string } | null = null;
+  if (arquivoImagem) {
+    imagemRemota = await enviarImagemAmbiente(arquivoImagem);
+  }
 
-    await tx.ambienteSonoroAudio.createMany({
-      data: dados.audios.map((item) => ({
-        idAmbienteSonoro: ambiente.idAmbienteSonoro,
-        idAudio: item.idAudio,
-        volume: item.volume,
-      })),
-    });
+  let ambienteCriado;
+  try {
+    ambienteCriado = await prisma.$transaction(async (tx) => {
+      const ambiente = await tx.ambienteSonoro.create({
+        data: {
+          idUsuario,
+          nome: dados.nome,
+          descricao: dados.descricao ?? null,
+          finalidade: dados.finalidade,
+          origem: ORIGEM_PERSONALIZADO,
+          idCategoria: dados.idCategoria ?? null,
+          publicado: false,
+          imagem: imagemRemota?.imagem ?? null,
+          imagemPublicId: imagemRemota?.imagemPublicId ?? null,
+        },
+      });
 
-    const resultado = await tx.ambienteSonoro.findUniqueOrThrow({
-      where: { idAmbienteSonoro: ambiente.idAmbienteSonoro },
-      include: {
-        categoria: true,
-        audios: {
-          include: {
-            audio: {
-              include: {
-                categoria: true,
+      await tx.ambienteSonoroAudio.createMany({
+        data: dados.audios.map((item) => ({
+          idAmbienteSonoro: ambiente.idAmbienteSonoro,
+          idAudio: item.idAudio,
+          volume: item.volume,
+        })),
+      });
+
+      const resultado = await tx.ambienteSonoro.findUniqueOrThrow({
+        where: { idAmbienteSonoro: ambiente.idAmbienteSonoro },
+        include: {
+          categoria: true,
+          audios: {
+            include: {
+              audio: {
+                include: {
+                  categoria: true,
+                },
               },
             },
-          },
-          orderBy: {
-            audio: { titulo: "asc" },
+            orderBy: {
+              audio: { titulo: "asc" },
+            },
           },
         },
-      },
-    });
+      });
 
-    return resultado;
-  });
+      return resultado;
+    });
+  } catch (erro) {
+    if (imagemRemota) await compensarImagemAmbiente(imagemRemota.imagemPublicId);
+    throw erro;
+  }
 
   return dtoAmbiente(ambienteCriado);
 }
@@ -396,7 +413,7 @@ export async function excluirAmbienteSonoro(idUsuario: string, idAmbienteSonoro:
       idUsuario,
       origem: ORIGEM_PERSONALIZADO,
     },
-    select: { idAmbienteSonoro: true },
+    select: { idAmbienteSonoro: true, imagemPublicId: true },
   });
 
   if (!ambienteExistente) {
@@ -414,6 +431,10 @@ export async function excluirAmbienteSonoro(idUsuario: string, idAmbienteSonoro:
       where: { idAmbienteSonoro },
     });
   });
+
+  if (ambienteExistente.imagemPublicId) {
+    await removerImagemAmbiente(ambienteExistente.imagemPublicId).catch(() => undefined);
+  }
 }
 
 /* ========================================================================= */

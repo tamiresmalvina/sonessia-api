@@ -107,6 +107,7 @@ rotasAmbientesSonoros.post(
   "/",
   validarOrigemMutacao,
   autenticar,
+  receberImagemAmbiente,
   validarCorpo(schemaCriarAmbienteSonoro),
   criarAmbienteSonoro
 );

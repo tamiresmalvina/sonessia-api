@@ -28,7 +28,11 @@ function idAmbienteSonoro(req: Request): string {
 
 export async function criarAmbienteSonoro(req: Request, res: Response, next: NextFunction) {
   try {
-    const ambiente = await servicoAmbienteSonoro.criarAmbienteSonoro(idUsuario(req), req.body);
+    const ambiente = await servicoAmbienteSonoro.criarAmbienteSonoro(
+      idUsuario(req),
+      req.metadadosAmbiente ?? req.body,
+      req.arquivoImagemAmbiente,
+    );
     res.status(201).json({
       mensagem: "Ambiente sonoro criado com sucesso.",
       ambiente,

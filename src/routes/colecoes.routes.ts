@@ -8,6 +8,7 @@ import {
   listarColecoes,
   obterColecao,
   removerAmbienteColecao,
+  reordenarAmbientesColecao,
 } from "../controllers/colecao.controller.js";
 import { autenticar } from "../middlewares/autenticacao.middleware.js";
 import { exigirPerfil } from "../middlewares/autorizacao.middleware.js";
@@ -17,6 +18,7 @@ import {
   schemaAdicionarAmbienteColecao,
   schemaAtualizarColecao,
   schemaCriarColecao,
+  schemaReordenarAmbientesColecao,
 } from "../schemas/colecao.schema.js";
 
 const rotasColecoes = Router();
@@ -63,6 +65,14 @@ rotasColecoes.post(
   ...protegerComum,
   validarCorpo(schemaAdicionarAmbienteColecao),
   adicionarAmbienteColecao
+);
+
+rotasColecoes.put(
+  "/:idColecao/ambientes/ordem",
+  validarOrigemMutacao,
+  ...protegerComum,
+  validarCorpo(schemaReordenarAmbientesColecao),
+  reordenarAmbientesColecao
 );
 
 rotasColecoes.delete(

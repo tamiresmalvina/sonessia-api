@@ -113,3 +113,12 @@ export async function removerAmbienteColecao(req: Request, res: Response, next: 
   }
 }
 
+export async function reordenarAmbientesColecao(req: Request, res: Response, next: NextFunction) {
+  try {
+    await servicoColecao.reordenarAmbientesColecao(idUsuario(req), idColecao(req), req.body);
+    res.status(200).json({ mensagem: "Ordem dos ambientes atualizada com sucesso." });
+  } catch (erro) {
+    next(erro);
+  }
+}
+

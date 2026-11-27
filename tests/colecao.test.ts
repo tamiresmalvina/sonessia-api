@@ -263,6 +263,37 @@ describe("Gerenciamento de Coleções Sonoras (US06)", () => {
       expect(resposta.body.colecao.quantidadeAmbientes).toBe(0);
     });
 
+    it("cria coleção com ambientes na ordem selecionada e persiste suas posições", async () => {
+      const usuario = await criarUsuario(Perfil.COMUM);
+      const primeiroSelecionado = await criarAmbientePersonalizado(usuario.id, "Ambiente primeiro");
+      const segundoSelecionado = await criarAmbientePersonalizado(usuario.id, "Ambiente segundo");
+
+      const resposta = await request(app)
+        .post("/colecoes")
+        .set("Authorization", `Bearer ${token(usuario)}`)
+        .send({
+          nome: "Coleção ordenada",
+          idsAmbientesSonoros: [primeiroSelecionado.idAmbienteSonoro, segundoSelecionado.idAmbienteSonoro],
+        });
+
+      expect(resposta.status).toBe(201);
+      expect(resposta.body.colecao.ambientes.map((ambiente: { idAmbienteSonoro: string }) => ambiente.idAmbienteSonoro))
+        .toEqual([primeiroSelecionado.idAmbienteSonoro, segundoSelecionado.idAmbienteSonoro]);
+
+      const recarregada = await request(app)
+        .get(`/colecoes/${resposta.body.colecao.idColecao}`)
+        .set("Authorization", `Bearer ${token(usuario)}`);
+      expect(recarregada.status).toBe(200);
+      expect(recarregada.body.colecao.ambientes.map((ambiente: { idAmbienteSonoro: string }) => ambiente.idAmbienteSonoro))
+        .toEqual([primeiroSelecionado.idAmbienteSonoro, segundoSelecionado.idAmbienteSonoro]);
+
+      const associacoes = await prisma.colecaoAmbienteSonoro.findMany({
+        where: { idColecao: resposta.body.colecao.idColecao },
+        orderBy: { posicao: "asc" },
+      });
+      expect(associacoes.map((associacao) => associacao.posicao)).toEqual([0, 1]);
+    });
+
     it("valida dados obrigatórios e limites na criação da coleção", async () => {
       const usuario = await criarUsuario(Perfil.COMUM);
 
@@ -415,6 +446,45 @@ describe("Gerenciamento de Coleções Sonoras (US06)", () => {
       expect(limparDesc.status).toBe(200);
       expect(limparDesc.body.colecao.descricao).toBeNull();
       expect(limparDesc.body.colecao.nome).toBe("Nome Atualizado");
+    });
+
+    it("atualiza nome, descrição e ambientes na ordem escolhida, removendo vínculos sem apagar ambientes", async () => {
+      const usuario = await criarUsuario(Perfil.COMUM);
+      const tokenUser = token(usuario);
+      const ambienteA = await criarAmbientePersonalizado(usuario.id, "Ambiente A");
+      const ambienteB = await criarAmbientePersonalizado(usuario.id, "Ambiente B");
+      const ambienteC = await criarAmbientePersonalizado(usuario.id, "Ambiente C");
+      const criacao = await request(app)
+        .post("/colecoes")
+        .set("Authorization", `Bearer ${tokenUser}`)
+        .send({
+          nome: "Original",
+          idsAmbientesSonoros: [ambienteA.idAmbienteSonoro, ambienteB.idAmbienteSonoro],
+        });
+      const idColecao = criacao.body.colecao.idColecao;
+
+      const atualizacao = await request(app)
+        .patch(`/colecoes/${idColecao}`)
+        .set("Authorization", `Bearer ${tokenUser}`)
+        .send({
+          nome: "Atualizada",
+          descricao: "Descrição nova",
+          idsAmbientesSonoros: [ambienteC.idAmbienteSonoro, ambienteA.idAmbienteSonoro],
+        });
+
+      expect(atualizacao.status).toBe(200);
+      expect(atualizacao.body.colecao.nome).toBe("Atualizada");
+      expect(atualizacao.body.colecao.descricao).toBe("Descrição nova");
+      expect(atualizacao.body.colecao.ambientes.map((ambiente: { idAmbienteSonoro: string }) => ambiente.idAmbienteSonoro))
+        .toEqual([ambienteC.idAmbienteSonoro, ambienteA.idAmbienteSonoro]);
+      expect(await prisma.ambienteSonoro.findUnique({ where: { idAmbienteSonoro: ambienteB.idAmbienteSonoro } }))
+        .not.toBeNull();
+      const posicoes = await prisma.colecaoAmbienteSonoro.findMany({
+        where: { idColecao },
+        orderBy: { posicao: "asc" },
+      });
+      expect(posicoes.map((associacao) => [associacao.idAmbienteSonoro, associacao.posicao]))
+        .toEqual([[ambienteC.idAmbienteSonoro, 0], [ambienteA.idAmbienteSonoro, 1]]);
     });
 
     it("exclui uma coleção com sucesso e confirma que não pode mais ser consultada", async () => {
@@ -594,6 +664,53 @@ describe("Gerenciamento de Coleções Sonoras (US06)", () => {
 
       expect(duplicada.status).toBe(409);
       expect(duplicada.body.erro.codigo).toBe("AMBIENTE_JA_NA_COLECAO");
+    });
+
+    it("rejeita ambientes da plataforma na criação e edição e preserva vínculos legados", async () => {
+      const admin = await criarUsuario(Perfil.ADMIN);
+      const usuario = await criarUsuario(Perfil.COMUM);
+      const tokenUser = token(usuario);
+      const ambientePlataforma = await criarAmbientePreConfigurado(admin.id, "Ambiente legado público");
+      const ambienteUsuario = await criarAmbientePersonalizado(usuario.id, "Ambiente do usuário");
+
+      const criacaoInvalida = await request(app)
+        .post("/colecoes")
+        .set("Authorization", `Bearer ${tokenUser}`)
+        .send({ nome: "Não deve criar", idsAmbientesSonoros: [ambientePlataforma.idAmbienteSonoro] });
+      expect(criacaoInvalida.status).toBe(400);
+      expect(criacaoInvalida.body.erro.codigo).toBe("AMBIENTE_PRECONFIGURADO_NAO_PERMITIDO");
+
+      const criacao = await request(app)
+        .post("/colecoes")
+        .set("Authorization", `Bearer ${tokenUser}`)
+        .send({ nome: "Coleção legado", idsAmbientesSonoros: [ambienteUsuario.idAmbienteSonoro] });
+      const idColecao = criacao.body.colecao.idColecao;
+      await prisma.colecaoAmbienteSonoro.create({
+        data: {
+          idColecao,
+          idAmbienteSonoro: ambientePlataforma.idAmbienteSonoro,
+          posicao: 1,
+        },
+      });
+
+      const edicaoInvalida = await request(app)
+        .patch(`/colecoes/${idColecao}`)
+        .set("Authorization", `Bearer ${tokenUser}`)
+        .send({ nome: "Não deve salvar", idsAmbientesSonoros: [ambientePlataforma.idAmbienteSonoro] });
+      expect(edicaoInvalida.status).toBe(400);
+      expect(edicaoInvalida.body.erro.codigo).toBe("AMBIENTE_PRECONFIGURADO_NAO_PERMITIDO");
+
+      const edicao = await request(app)
+        .patch(`/colecoes/${idColecao}`)
+        .set("Authorization", `Bearer ${tokenUser}`)
+        .send({ nome: "Coleção preservada", idsAmbientesSonoros: [ambienteUsuario.idAmbienteSonoro] });
+      expect(edicao.status).toBe(200);
+      expect(edicao.body.colecao.nome).toBe("Coleção preservada");
+      expect(edicao.body.colecao.ambientes.map((ambiente: { idAmbienteSonoro: string }) => ambiente.idAmbienteSonoro))
+        .toEqual([ambienteUsuario.idAmbienteSonoro, ambientePlataforma.idAmbienteSonoro]);
+      expect(await prisma.ambienteSonoro.findUnique({
+        where: { idAmbienteSonoro: ambientePlataforma.idAmbienteSonoro },
+      })).not.toBeNull();
     });
 
     it("bloqueia adicionar ambiente pré-configurado/público à coleção com HTTP 400", async () => {

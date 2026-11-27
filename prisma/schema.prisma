@@ -207,6 +207,7 @@ model Audio {
 model ColecaoAmbienteSonoro {
   idColecao        String @db.Uuid
   idAmbienteSonoro String @db.Uuid
+  posicao          Int    @default(0)
 
   colecao        Colecao        @relation(fields: [idColecao], references: [idColecao])
   ambienteSonoro AmbienteSonoro @relation(fields: [idAmbienteSonoro], references: [idAmbienteSonoro])

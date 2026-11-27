@@ -1,6 +1,5 @@
 import { prisma } from "../../lib/prisma.js";
 import type { Prisma } from "../../generated/prisma/client.js";
-import { type Finalidade } from "../../generated/prisma/enums.js";
 import { AppError } from "../errors/app.error.js";
 import {
   schemaCriarColecao,
@@ -74,7 +73,7 @@ interface ColecaoResumoBanco {
     ambienteSonoro: {
       idAmbienteSonoro: string;
       nome: string;
-      finalidade: Finalidade;
+      categoria: { nome: string } | null;
     };
   }>;
 }
@@ -98,7 +97,7 @@ function dtoColecaoResumo(colecao: ColecaoResumoBanco) {
     ? [...colecao.ambientesSonoros].sort((a, b) => a.posicao - b.posicao).map((assoc) => ({
         idAmbienteSonoro: assoc.ambienteSonoro.idAmbienteSonoro,
         nome: assoc.ambienteSonoro.nome,
-        finalidade: assoc.ambienteSonoro.finalidade,
+        categoria: assoc.ambienteSonoro.categoria?.nome ?? null,
       }))
     : [];
 
@@ -170,7 +169,7 @@ export async function listarColecoes(idUsuario: string) {
             select: {
               idAmbienteSonoro: true,
               nome: true,
-              finalidade: true,
+              categoria: { select: { nome: true } },
             },
           },
         },

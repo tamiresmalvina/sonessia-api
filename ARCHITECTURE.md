@@ -200,7 +200,7 @@ A migração inicial cria UUID para usuários? O Prisma atual confirma `Usuario.
 - **Validação de composição:** Cada ambiente deve conter ao menos um áudio, sem repetição de IDs de áudio na mesma composição, com volumes válidos (0 a 100) e validação prévia de existência no catálogo antes da persistência.
 - **Transações e integridade:** Criação e alteração de ambientes e suas composições ocorrem em transações Prisma. A exclusão de um ambiente (personalizado ou pré-configurado) remove em transação as associações em `AmbienteSonoroAudio` e `ColecaoAmbienteSonoro`, respeitando o `ON DELETE RESTRICT` do banco de dados sem excluir áudios do catálogo ou coleções.
 - **Isolamento, autorização e DTO:**
-  - O catálogo público (`/ambientes-sonoros/publicos`) é aberto e retorna apenas ambientes pré-configurados publicados, permitindo filtros por finalidade.
+  - O catálogo público (`/ambientes-sonoros/publicos`) é aberto e retorna apenas ambientes pré-configurados publicados, permitindo filtros por `idCategoria`.
   - A administração (`/ambientes-sonoros/pre-configurados`) exige autenticação e `exigirPerfil(Perfil.ADMIN)`.
   - O gerenciamento de personalizados (`/ambientes-sonoros`) é privado e isolado por `req.usuario.id`. Usuários e administradores acessam apenas seus próprios ambientes pessoais, retornando HTTP 404 para recursos inexistentes ou de outros usuários para evitar vazamento de existência.
   - Respostas DTO incluem metadados públicos e URLs de reprodução dos áudios, excluindo campos privados (`arquivoPublicId`, `idUsuario`).
@@ -293,8 +293,7 @@ Públicos ou sem autenticação obrigatória na implementação atual:
 - cadastro, verificação, reenvio, login, renovação, logout, recuperação, redefinição, reativação;
 - `/status`;
 - `GET /audios` e `GET /audios/:idAudio` (consulta pública do catálogo de áudios).
-- `GET /ambientes-sonoros/publicos` (listagem pública de ambientes pré-configurados publicados, com filtro por `finalidade`).
-- `GET /ambientes-sonoros/publicos/finalidades` e `GET /ambientes-sonoros/finalidades` (listagem pública de finalidades disponíveis).
+- `GET /ambientes-sonoros/publicos` (listagem pública de ambientes pré-configurados publicados, com filtro por `idCategoria`).
 - `GET /ambientes-sonoros/publicos/:idAmbienteSonoro` (consulta pública de ambiente pré-configurado publicado).
 
 ### Foto de perfil e exclusão
@@ -376,7 +375,7 @@ Os testes de integração dependem de um PostgreSQL específico para testes ou d
 | US05 — Ambientes sonoros personalizados                            | Rotas `/ambientes-sonoros` (alias `/ambientes`), controller, service, schema Zod e 22 testes em `tests/ambiente-sonoro.test.ts` | **Implementado; criação com composição, volumes individuais (0 a 100), listagem, consulta, edição transacional, exclusão protegida e isolamento rigoroso por usuário** |
 | US05 — cadastro, perfil após autenticação                          | `cadastro`, `login`, `/eu`, services e testes de cadastro/perfil | **Implementado; perfil pessoal implementado para dados básicos e foto**        |
 | US06 — Coleções sonoras (organização de ambientes)                 | Rotas `/colecoes`, controller, service, schema Zod e 20 testes em `tests/colecao.test.ts` | **Implementado; CRUD completo restrito a COMUM, associação/desassociação de ambientes, proteção contra duplicação, suporte a ambientes em múltiplas coleções, preservação total dos ambientes sonoros e filtro `?semColecao=true`** |
-| US08 — Filtragem e consulta de ambientes públicos                  | Rotas `/ambientes-sonoros/publicos`, `/ambientes-sonoros/publicos/finalidades`, schemas e testes | **Implementado; listagem pública com filtro opcional por enum de finalidade, consulta por ID e ocultação rigorosa de rascunhos e personalizados** |
+| US08 — Filtragem e consulta de ambientes públicos                  | Rotas `/ambientes-sonoros/publicos`, schemas e testes | **Implementado; listagem pública com filtro opcional por categoria dinâmica, consulta por ID e ocultação rigorosa de rascunhos e personalizados** |
 | Conta e autenticação                                               | JWT, refresh cookie, sessões, verificação e recuperação          | **Implementado; coberto por múltiplos testes**                                 |
 | Gestão do usuário                                                  | nome, nascimento, e-mail, exclusão/reactivação                   | **Implementado**                                                               |
 | Foto de perfil (complemento não listado no mesmo detalhe em TASKS) | rotas, middleware, service e Cloudinary                          | **Implementado**, condicionado à configuração Cloudinary                       |
@@ -405,7 +404,7 @@ A divisão de responsabilidade da reprodução permanece pendente: não há play
 ### Lacunas observadas no código
 
 - Os módulos de catálogo de áudios (administrativo e público), de ambientes sonoros personalizados, de ambientes sonoros pré-configurados/públicos (com publicação, composição e volumes) e de coleções sonoras (organização de ambientes por usuário) estão implementados e testados.
-- O campo `publicado: Boolean @default(false)` em `AmbienteSonoro` controla a visibilidade pública de pré-configurados, com índices compostos `[origem, publicado]` e `[finalidade, publicado]`.
+- O campo `publicado: Boolean @default(false)` em `AmbienteSonoro` controla a visibilidade pública de pré-configurados, com índice composto `[origem, publicado]`.
 - O controle de acesso administrativo com `exigirPerfil(Perfil.ADMIN)` está ativo nas mutações de `/audios` e no gerenciamento completo de `/ambientes-sonoros/pre-configurados`.
 - O módulo de coleções (`/colecoes`) é restrito exclusivamente a usuários com perfil `COMUM` (`exigirPerfil(Perfil.COMUM)`), bloqueando o acesso de administradores com HTTP 403.
 - A listagem geral de ambientes personalizados (`GET /ambientes-sonoros`) inclui a listagem das coleções associadas a cada ambiente e oferece suporte ao parâmetro de consulta `?semColecao=true` para recuperar apenas ambientes não categorizados.
@@ -414,8 +413,8 @@ A divisão de responsabilidade da reprodução permanece pendente: não há play
 
 ### Decisões pendentes a confirmar
 
-1. Ambiente pré-configurado deve permitir finalidade fixa (`enum Finalidade`) ou finalidade administrável em tabela?
-2. Categorias de áudio devem ser listas fixas ou entidades gerenciadas?
+1. Confirmar se a política atual de impedir exclusão de categorias vinculadas continua adequada.
+2. Categorias de áudio e de ambientes são entidades dinâmicas gerenciadas por administradores.
 3. Remoção de áudio deve ser física ou lógica, e qual campo representará ativo/desativado?
 4. Ambientes publicados precisam de um estado de publicação e, se aplicável, campo de disponibilidade.
 5. A API só fornece metadados/URLs ou também coordenará reprodução? A USER STORY pede confirmação da divisão entre frontend/player e backend.

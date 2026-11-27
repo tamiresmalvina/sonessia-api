@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { app } from "../src/app.js";
 import { prisma } from "../lib/prisma.js";
-import { Finalidade, Perfil } from "../generated/prisma/enums.js";
+import { Perfil } from "../generated/prisma/enums.js";
 import { emitirTokenAcesso } from "../src/utils/jwt.util.js";
 import { garantirBancoTestesIsolado } from "./helpers/isolamento-banco.helper.js";
 
@@ -66,7 +66,6 @@ describe("Histórico de reprodução de ambientes", () => {
         idUsuario,
         nome: `Ambiente ${randomUUID()}`,
         descricao: "Descrição de teste",
-        finalidade: Finalidade.SONO,
         origem: opcoes.origem ?? "personalizado",
         publicado: opcoes.publicado ?? false,
         imagem: "https://exemplo.test/capa.jpg",

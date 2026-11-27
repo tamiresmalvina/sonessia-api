@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { app } from "../src/app.js";
 import { prisma } from "../lib/prisma.js";
-import { Finalidade, Perfil } from "../generated/prisma/enums.js";
+import { Perfil } from "../generated/prisma/enums.js";
 import { emitirTokenAcesso } from "../src/utils/jwt.util.js";
 import { garantirBancoTestesIsolado } from "./helpers/isolamento-banco.helper.js";
 
@@ -102,7 +102,6 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
 
       const criacao = await request(app).post("/ambientes-sonoros").send({
         nome: "Foco Matinal",
-        finalidade: Finalidade.CONCENTRACAO,
         audios: [{ idAudio: idInexistente, volume: 50 }],
       });
       const listagem = await request(app).get("/ambientes-sonoros");

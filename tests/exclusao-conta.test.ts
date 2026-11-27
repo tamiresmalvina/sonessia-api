@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { prisma } from "../lib/prisma.js";
-import { Finalidade, Perfil, StatusSessao } from "../generated/prisma/enums.js";
+import { Perfil, StatusSessao } from "../generated/prisma/enums.js";
 import { app } from "../src/app.js";
 import {
   cloudinary,
@@ -158,7 +158,6 @@ describe("Exclusão e reativação de conta", () => {
         idUsuario,
         nome,
         descricao: null,
-        finalidade: Finalidade.RELAXAMENTO,
         origem: "personalizado",
       },
     });

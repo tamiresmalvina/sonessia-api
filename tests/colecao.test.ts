@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { app } from "../src/app.js";
 import { prisma } from "../lib/prisma.js";
-import { Finalidade, Perfil } from "../generated/prisma/enums.js";
+import { Perfil } from "../generated/prisma/enums.js";
 import { emitirTokenAcesso } from "../src/utils/jwt.util.js";
 import { garantirBancoTestesIsolado } from "./helpers/isolamento-banco.helper.js";
 
@@ -119,7 +119,6 @@ describe("Gerenciamento de Coleções Sonoras (US06)", () => {
         idUsuario,
         nome,
         descricao: `Descrição de ${nome}`,
-        finalidade: Finalidade.ESTUDO,
         origem: "personalizado",
         publicado: false,
       },
@@ -141,7 +140,6 @@ describe("Gerenciamento de Coleções Sonoras (US06)", () => {
         idUsuario: idAdmin,
         nome,
         descricao: `Descrição de ${nome}`,
-        finalidade: Finalidade.CONCENTRACAO,
         origem: "preconfigurado",
         publicado: true,
       },

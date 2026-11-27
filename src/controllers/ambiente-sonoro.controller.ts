@@ -1,5 +1,4 @@
 import type { NextFunction, Request, Response } from "express";
-import { Finalidade } from "../../generated/prisma/enums.js";
 import { AppError } from "../errors/app.error.js";
 import * as servicoAmbienteSonoro from "../services/ambiente-sonoro.service.js";
 import {
@@ -117,17 +116,14 @@ export async function criarAmbientePreConfigurado(req: Request, res: Response, n
 
 export async function listarAmbientesPreConfigurados(req: Request, res: Response, next: NextFunction) {
   try {
-    let finalidade: Finalidade | undefined;
-    if (typeof req.query.finalidade === "string") {
-      finalidade = schemaFiltroAmbientesPublicos.parse({ finalidade: req.query.finalidade }).finalidade;
-    }
+    const filtroCategoria = schemaFiltroAmbientesPublicos.parse({ idCategoria: req.query.idCategoria });
 
     let publicado: boolean | undefined;
     if (req.query.publicado === "true") publicado = true;
     if (req.query.publicado === "false") publicado = false;
 
-    const filtros: { finalidade?: Finalidade; publicado?: boolean } = {};
-    if (finalidade !== undefined) filtros.finalidade = finalidade;
+    const filtros: { idCategoria?: string; publicado?: boolean } = {};
+    if (filtroCategoria.idCategoria) filtros.idCategoria = filtroCategoria.idCategoria;
     if (publicado !== undefined) filtros.publicado = publicado;
 
     const ambientes = await servicoAmbienteSonoro.listarAmbientesPreConfigurados(filtros);
@@ -197,11 +193,8 @@ export async function excluirAmbientePreConfigurado(req: Request, res: Response,
 
 export async function listarAmbientesPublicos(req: Request, res: Response, next: NextFunction) {
   try {
-    let finalidade: Finalidade | undefined;
-    if (typeof req.query.finalidade === "string") {
-      finalidade = schemaFiltroAmbientesPublicos.parse({ finalidade: req.query.finalidade }).finalidade;
-    }
-    const ambientes = await servicoAmbienteSonoro.listarAmbientesPublicos(finalidade);
+    const filtro = schemaFiltroAmbientesPublicos.parse({ idCategoria: req.query.idCategoria });
+    const ambientes = await servicoAmbienteSonoro.listarAmbientesPublicos(filtro.idCategoria ?? undefined);
     res.status(200).json({ ambientes });
   } catch (erro) {
     next(erro);
@@ -212,15 +205,6 @@ export async function obterAmbientePublico(req: Request, res: Response, next: Ne
   try {
     const ambiente = await servicoAmbienteSonoro.obterAmbientePublico(idAmbienteSonoro(req));
     res.status(200).json({ ambiente });
-  } catch (erro) {
-    next(erro);
-  }
-}
-
-export async function listarFinalidadesDisponiveis(_req: Request, res: Response, next: NextFunction) {
-  try {
-    const finalidades = servicoAmbienteSonoro.listarFinalidadesDisponiveis();
-    res.status(200).json({ finalidades });
   } catch (erro) {
     next(erro);
   }

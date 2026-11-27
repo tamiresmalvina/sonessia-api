@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { app } from "../src/app.js";
 import { prisma } from "../lib/prisma.js";
-import { Finalidade, Perfil } from "../generated/prisma/enums.js";
+import { Perfil } from "../generated/prisma/enums.js";
 import { garantirBancoTestesIsolado } from "./helpers/isolamento-banco.helper.js";
 import { emitirTokenAcesso } from "../src/utils/jwt.util.js";
 import { criarAudio } from "../src/services/audio.service.js";
@@ -227,7 +227,6 @@ describe("CRUD administrativo de categorias", () => {
         idUsuario: usuario.id,
         idCategoria: categoriaAmbiente.idCategoria,
         nome: "Ambiente de teste",
-        finalidade: Finalidade.SONO,
         origem: "personalizado",
       },
     });
@@ -280,7 +279,6 @@ describe("CRUD administrativo de categorias", () => {
     const audio = await criarAudioBanco(comum.id, audioAtivo.idCategoria);
     const dadosAmbiente = {
       nome: "Novo ambiente",
-      finalidade: Finalidade.SONO,
       audios: [{ idAudio: audio.idAudio, volume: 50 }],
     };
     await expect(criarAmbienteSonoro(comum.id, {

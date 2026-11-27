@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import request from "supertest";
 import { app } from "../src/app.js";
 import { prisma } from "../lib/prisma.js";
-import { Finalidade, Perfil } from "../generated/prisma/enums.js";
+import { Perfil } from "../generated/prisma/enums.js";
 import { emitirTokenAcesso } from "../src/utils/jwt.util.js";
 import { garantirBancoTestesIsolado } from "./helpers/isolamento-banco.helper.js";
 import {
@@ -152,7 +152,6 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         data: {
           idUsuario: admin.id,
           nome: "Ambiente de listagem",
-          finalidade: Finalidade.SONO,
           origem: "preconfigurado",
         },
       });
@@ -447,7 +446,6 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
           idUsuario: admin.id,
           idCategoria: idCategoria ?? null,
           nome: "Publicável",
-          finalidade: Finalidade.ESTUDO,
           publicado: false,
           origem: "preconfigurado",
         },

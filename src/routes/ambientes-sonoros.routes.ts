@@ -11,7 +11,6 @@ import {
   listarAmbientesPreConfigurados,
   listarAmbientesPublicos,
   listarAmbientesSonoros,
-  listarFinalidadesDisponiveis,
   obterAmbientePreConfigurado,
   obterAmbientePublico,
   obterAmbienteSonoro,
@@ -36,8 +35,6 @@ const protegerAdmin = [autenticar, exigirPerfil(Perfil.ADMIN)];
 /* ROTAS PÚBLICAS (US08 / US14 - Sem autenticação obrigatória)               */
 /* ========================================================================= */
 
-rotasAmbientesSonoros.get("/publicos/finalidades", listarFinalidadesDisponiveis);
-rotasAmbientesSonoros.get("/finalidades", listarFinalidadesDisponiveis);
 rotasAmbientesSonoros.get("/publicos", listarAmbientesPublicos);
 rotasAmbientesSonoros.get("/publicos/:idAmbienteSonoro", obterAmbientePublico);
 

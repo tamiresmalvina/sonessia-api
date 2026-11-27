@@ -1,6 +1,5 @@
 import { prisma } from "../../lib/prisma.js";
 import type { Prisma } from "../../generated/prisma/client.js";
-import { Finalidade } from "../../generated/prisma/enums.js";
 import { randomUUID } from "node:crypto";
 import { AppError } from "../errors/app.error.js";
 import { exigirCategoriaAtiva } from "./categoria.service.js";
@@ -74,7 +73,6 @@ export interface AmbienteBanco {
   } | null;
   nome: string;
   descricao: string | null;
-  finalidade: Finalidade;
   origem: string;
   publicado: boolean;
   imagem: string | null;
@@ -127,7 +125,6 @@ export function dtoAmbiente(ambiente: AmbienteBanco) {
     categoria: ambiente.categoria?.nome ?? null,
     nome: ambiente.nome,
     descricao: ambiente.descricao,
-    finalidade: ambiente.finalidade,
     origem: ambiente.origem,
     publicado: ambiente.publicado,
     imagem: ambiente.imagem,
@@ -170,7 +167,7 @@ export async function criarAmbienteSonoro(
   arquivoImagem?: ArquivoImagemAmbienteRecebido,
 ) {
   const dados: EntradaCriarAmbienteSonoro = schemaCriarAmbienteSonoro.parse(dadosBrutos);
-  if (dados.idCategoria) await exigirCategoriaAtiva(dados.idCategoria, "AMBIENTE");
+  await exigirCategoriaAtiva(dados.idCategoria, "AMBIENTE");
   await verificarAudiosExistentes(dados.audios);
 
   let imagemRemota: { imagem: string; imagemPublicId: string } | null = null;
@@ -186,9 +183,8 @@ export async function criarAmbienteSonoro(
           idUsuario,
           nome: dados.nome,
           descricao: dados.descricao ?? null,
-          finalidade: dados.finalidade,
           origem: ORIGEM_PERSONALIZADO,
-          idCategoria: dados.idCategoria ?? null,
+          idCategoria: dados.idCategoria,
           publicado: false,
           imagem: imagemRemota?.imagem ?? null,
           imagemPublicId: imagemRemota?.imagemPublicId ?? null,
@@ -353,10 +349,7 @@ export async function atualizarAmbienteSonoro(
     const alteracao: Prisma.AmbienteSonoroUpdateInput = {};
     if (dados.nome !== undefined) alteracao.nome = dados.nome;
     if (dados.descricao !== undefined) alteracao.descricao = dados.descricao;
-    if (dados.idCategoria !== undefined) {
-      alteracao.categoria = dados.idCategoria ? { connect: { idCategoria: dados.idCategoria } } : { disconnect: true };
-    }
-    if (dados.finalidade !== undefined) alteracao.finalidade = dados.finalidade;
+    if (dados.idCategoria !== undefined) alteracao.categoria = { connect: { idCategoria: dados.idCategoria } };
 
     if (Object.keys(alteracao).length > 0) {
       await tx.ambienteSonoro.update({
@@ -552,7 +545,7 @@ export async function criarAmbientePreConfigurado(
   arquivoImagem?: ArquivoImagemAmbienteRecebido,
 ) {
   const dados: EntradaCriarAmbientePreConfigurado = schemaCriarAmbientePreConfigurado.parse(dadosBrutos);
-  if (dados.idCategoria) await exigirCategoriaAtiva(dados.idCategoria, "AMBIENTE");
+  await exigirCategoriaAtiva(dados.idCategoria, "AMBIENTE");
   await verificarAudiosExistentes(dados.audios);
   await verificarAmbienteDuplicado(dados.nome, dados.audios);
 
@@ -569,9 +562,8 @@ export async function criarAmbientePreConfigurado(
           idUsuario: idAdmin,
           nome: dados.nome,
           descricao: dados.descricao ?? null,
-          finalidade: dados.finalidade,
           origem: ORIGEM_PRECONFIGURADO,
-          idCategoria: dados.idCategoria ?? null,
+          idCategoria: dados.idCategoria,
           publicado: dados.publicado ?? false,
           imagem: imagemRemota?.imagem ?? dados.imagem ?? null,
           imagemPublicId: imagemRemota?.imagemPublicId ?? null,
@@ -620,16 +612,14 @@ export async function criarAmbientePreConfigurado(
 }
 
 export async function listarAmbientesPreConfigurados(filtros?: {
-  finalidade?: Finalidade | undefined;
+  idCategoria?: string | undefined;
   publicado?: boolean | undefined;
 }) {
   const where: Prisma.AmbienteSonoroWhereInput = {
     origem: ORIGEM_PRECONFIGURADO,
   };
 
-  if (filtros?.finalidade !== undefined) {
-    where.finalidade = filtros.finalidade;
-  }
+  if (filtros?.idCategoria !== undefined) where.idCategoria = filtros.idCategoria;
   if (filtros?.publicado !== undefined) {
     where.publicado = filtros.publicado;
   }
@@ -732,12 +722,7 @@ export async function atualizarAmbientePreConfigurado(
       const alteracao: Prisma.AmbienteSonoroUpdateInput = {};
       if (dados.nome !== undefined) alteracao.nome = dados.nome;
       if (dados.descricao !== undefined) alteracao.descricao = dados.descricao;
-      if (dados.idCategoria !== undefined) {
-        alteracao.categoria = dados.idCategoria
-          ? { connect: { idCategoria: dados.idCategoria } }
-          : { disconnect: true };
-      }
-      if (dados.finalidade !== undefined) alteracao.finalidade = dados.finalidade;
+      if (dados.idCategoria !== undefined) alteracao.categoria = { connect: { idCategoria: dados.idCategoria } };
       if (dados.publicado !== undefined) alteracao.publicado = dados.publicado;
       if (imagemRemota) {
         alteracao.imagem = imagemRemota.imagem;
@@ -893,15 +878,13 @@ export async function excluirAmbientePreConfigurado(idAmbienteSonoro: string) {
 /* CONSULTAS PÚBLICAS (US08 / US14 - Catálogo público sem autenticação)       */
 /* ========================================================================= */
 
-export async function listarAmbientesPublicos(filtroFinalidade?: Finalidade) {
+export async function listarAmbientesPublicos(idCategoria?: string) {
   const where: Prisma.AmbienteSonoroWhereInput = {
     origem: ORIGEM_PRECONFIGURADO,
     publicado: true,
   };
 
-  if (filtroFinalidade !== undefined) {
-    where.finalidade = filtroFinalidade;
-  }
+  if (idCategoria !== undefined) where.idCategoria = idCategoria;
 
   const ambientes = await prisma.ambienteSonoro.findMany({
     where,
@@ -957,8 +940,4 @@ export async function obterAmbientePublico(idAmbienteSonoro: string) {
   }
 
   return dtoAmbiente(ambiente);
-}
-
-export function listarFinalidadesDisponiveis(): Finalidade[] {
-  return Object.values(Finalidade);
 }

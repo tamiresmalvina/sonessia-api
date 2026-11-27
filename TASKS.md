@@ -38,18 +38,18 @@
 
 **Prioridade:** Should Have
 
-- [x] Definir/modelar ambiente sonoro pré-configurado (nome, descrição, finalidade e estado de disponibilidade).
+- [x] Definir/modelar ambiente sonoro pré-configurado (nome, descrição, categoria dinâmica e estado de disponibilidade).
 - [x] Definir/modelar a relação entre ambiente e os áudios que o compõem.
 - [x] Permitir selecionar e adicionar áudios à composição de um ambiente.
 - [x] Permitir configurar o volume individual de cada áudio da composição.
 - [x] Validar os dados e a composição informados ao criar um ambiente.
-- [x] Associar o ambiente a uma finalidade disponível.
+- [x] Associar o ambiente a uma categoria dinâmica ativa do tipo `AMBIENTE`.
 - [x] Implementar criação e edição de ambientes pré-configurados.
 - [x] Implementar disponibilização/publicação e impedir que ambientes não publicados apareçam para usuários.
-- [x] Listar ambientes publicados por finalidade.
+- [x] Listar ambientes publicados por categoria dinâmica.
 - [x] Retornar a composição e os volumes configurados para reprodução.
 - [x] Proteger gerenciamento de ambientes para administradores autorizados.
-- [x] Testar composição, volumes individuais, finalidade, publicação e acesso público.
+- [x] Testar composição, volumes individuais, categoria, publicação e acesso público.
 
 ## US03 — Consultar catálogo gratuito de áudios
 
@@ -119,17 +119,16 @@
 
 > Observação: contagem regressiva e interrupção efetiva do áudio costumam ser responsabilidade do frontend/player. Evite implementar um temporizador no backend sem definir antes se o servidor realmente precisa manter esse estado.
 
-## US08 — Consultar ambientes prontos por finalidade
+## US08 — Consultar ambientes prontos por categoria dinâmica
 
 **Prioridade:** Should Have
 
-- [x] Disponibilizar consulta pública de finalidades disponíveis.
-- [x] Disponibilizar listagem de ambientes publicados agrupados/filtráveis por finalidade.
-- [x] Permitir consultar ambientes de uma finalidade específica.
+- [x] Disponibilizar listagem de ambientes publicados filtráveis por categoria dinâmica.
+- [x] Permitir consultar ambientes de uma categoria específica.
 - [x] Retornar detalhes básicos do ambiente (nome, descrição e sons componentes).
 - [x] Retornar os volumes configurados para cada áudio do ambiente.
 - [x] Garantir que ambientes não publicados ou indisponíveis não apareçam na consulta pública.
-- [x] Testar consulta por finalidade, detalhes e composição do ambiente.
+- [x] Testar consulta por categoria, detalhes e composição do ambiente.
 
 ## US09 — Alternar tema claro/escuro
 
@@ -175,7 +174,7 @@
 ## Revisão de incongruências e decisões pendentes
 
 - [ ] **US01 — “remover ou desativar”:** definir se remoção significa exclusão física ou lógica. A história indica efeitos distintos (“conforme a ação realizada”), então os critérios devem esclarecer a diferença.
-- [ ] **US02 e US08 — ambientes pré-configurados:** US02 descreve a administração/publicação e US08 a descoberta por finalidade; são complementares, mas convém padronizar o termo “finalidade” e definir se ela é uma entidade cadastrável ou uma lista fixa.
+- [x] **US02 e US08 — ambientes pré-configurados:** administração/publicação e descoberta usam categorias dinâmicas do tipo `AMBIENTE`.
 - [ ] **US03 e US01 — categorias:** US03 cita exemplos de categorias, mas “e outros ambientes sonoros cadastrados” deixa a lista aberta. Definir se categorias são fixas ou administráveis.
 - [ ] **US04 — reprodução na API:** reprodução simultânea, contínua, ajuste de volume em tempo real e remoção durante a execução são principalmente comportamentos do frontend/player. Definir quais contratos a API precisa fornecer, em vez de atribuir toda a reprodução ao backend.
 - [ ] **US05 — cadastro versus salvar ambientes:** US05 combina criação de conta com salvamento/consulta de ambientes. Como cadastro/autenticação já foram implementados, separar a parte de gestão dos ambientes em tarefas próprias evita tratar a US inteira como concluída.

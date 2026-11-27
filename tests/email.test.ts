@@ -4,6 +4,8 @@ import type { Transporter } from "nodemailer";
 import {
   enviarEmailVerificacao,
   enviarEmailRecuperacaoSenha,
+  enviarEmailSolicitacaoExclusaoConta,
+  enviarEmailConfirmacaoReativacaoConta,
   definirInterceptadorEmailTeste,
   definirForcarExecucaoEtherealEmTestes,
   definirTransportadorCustomizado,
@@ -603,6 +605,51 @@ describe("Envio de E-mail — Provedor Mailpit e Regras de Seleção/Bloqueio", 
     } finally {
       (ambiente as Record<string, unknown>).EMAIL_PROVIDER = ambienteOriginalProvider;
     }
+  });
+
+  it("envia confirmação de exclusão com data persistida e link de navegação ao frontend", async () => {
+    const enviarMensagem = vi.fn().mockResolvedValue({
+      messageId: "exclusao-id", accepted: ["usuario@teste.com"], rejected: [], response: "250 queued",
+    });
+    const transportador = {
+      options: {},
+      sendMail: enviarMensagem,
+    } as unknown as Transporter;
+    const origemAnterior = ambiente.FRONTEND_ORIGIN;
+    try {
+      (ambiente as Record<string, unknown>).FRONTEND_ORIGIN = "https://sonessia.teste/";
+      definirTransportadorCustomizado(transportador);
+      const data = new Date("2026-12-27T14:30:00.000Z");
+      const resultado = await enviarEmailSolicitacaoExclusaoConta({
+        destinatario: "usuario@teste.com", nome: "Pessoa", exclusaoDefinitivaEm: data,
+      });
+      expect(resultado.sucesso).toBe(true);
+      const mensagem = enviarMensagem.mock.calls[0]?.[0] as { text: string; html: string };
+      expect(mensagem.text).toContain(data.toISOString());
+      expect(mensagem.html).toContain("27 de dezembro de 2026");
+      expect(mensagem.html).toContain("https://sonessia.teste/login?recuperarConta=1");
+      expect(mensagem.html).toContain("não altera o estado da conta");
+    } finally {
+      (ambiente as Record<string, unknown>).FRONTEND_ORIGIN = origemAnterior;
+    }
+  });
+
+  it("envia e-mail de confirmação da reativação", async () => {
+    const enviarMensagem = vi.fn().mockResolvedValue({
+      messageId: "reativacao-id", accepted: ["usuario@teste.com"], rejected: [], response: "250 queued",
+    });
+    const transportador = {
+      options: {},
+      sendMail: enviarMensagem,
+    } as unknown as Transporter;
+    definirTransportadorCustomizado(transportador);
+    const resultado = await enviarEmailConfirmacaoReativacaoConta({
+      destinatario: "usuario@teste.com", nome: "Pessoa",
+    });
+    expect(resultado.sucesso).toBe(true);
+    const mensagem = enviarMensagem.mock.calls[0]?.[0] as { text: string; html: string };
+    expect(mensagem.text).toContain("solicitação de exclusão foi cancelada");
+    expect(mensagem.html).toContain("entre em contato com o suporte");
   });
 });
 

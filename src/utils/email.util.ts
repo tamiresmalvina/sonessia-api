@@ -36,6 +36,17 @@ export interface ParametrosEnvioNotificacaoAlteracaoEmail {
   nome: string;
 }
 
+export interface ParametrosEmailExclusaoConta {
+  destinatario: string;
+  nome: string;
+  exclusaoDefinitivaEm: Date;
+}
+
+export interface ParametrosEmailReativacaoConta {
+  destinatario: string;
+  nome: string;
+}
+
 // Handler customizado permitindo injeção/mock para testes automatizados
 let transportadorCustomizado: Transporter | null = null;
 let transportadorPadrao: Transporter | null = null;
@@ -49,6 +60,12 @@ let interceptadorAlteracaoEmailTeste:
   | null = null;
 let interceptadorNotificacaoAlteracaoEmailTeste:
   | ((parametros: ParametrosEnvioNotificacaoAlteracaoEmail) => Promise<ResultadoEnvioEmail>)
+  | null = null;
+let interceptadorExclusaoContaTeste:
+  | ((parametros: ParametrosEmailExclusaoConta) => Promise<ResultadoEnvioEmail>)
+  | null = null;
+let interceptadorReativacaoContaTeste:
+  | ((parametros: ParametrosEmailReativacaoConta) => Promise<ResultadoEnvioEmail>)
   | null = null;
 let forcarExecucaoEtherealEmTestes = false;
 
@@ -78,6 +95,18 @@ export function definirInterceptadorNotificacaoAlteracaoEmailTeste(
     | null
 ): void {
   interceptadorNotificacaoAlteracaoEmailTeste = fn;
+}
+
+export function definirInterceptadorExclusaoContaTeste(
+  fn: ((parametros: ParametrosEmailExclusaoConta) => Promise<ResultadoEnvioEmail>) | null
+): void {
+  interceptadorExclusaoContaTeste = fn;
+}
+
+export function definirInterceptadorReativacaoContaTeste(
+  fn: ((parametros: ParametrosEmailReativacaoConta) => Promise<ResultadoEnvioEmail>) | null
+): void {
+  interceptadorReativacaoContaTeste = fn;
 }
 
 export function definirForcarExecucaoEtherealEmTestes(forcar: boolean): void {
@@ -718,4 +747,99 @@ export async function enviarNotificacaoAlteracaoEmailConcluida(
       motivo: ehTimeout ? "TIMEOUT_RESPOSTA_SERVIDOR" : "ERRO_DISPARO_SMTP",
     };
   }
+}
+
+async function enviarEmailConta(
+  destinatario: string,
+  assunto: string,
+  texto: string,
+  html: string
+): Promise<ResultadoEnvioEmail> {
+  if (ambiente.NODE_ENV === "test" && !forcarExecucaoEtherealEmTestes) {
+    return { sucesso: true, status: "ENVIADO", mensagemId: "mock-test-conta-id" };
+  }
+  if (ambiente.NODE_ENV === "production" && !transportadorCustomizado) {
+    return { sucesso: false, status: "FALHA_ENVIO", motivo: "PROVEDOR_NAO_PERMITIDO_EM_PRODUCAO" };
+  }
+
+  let transportador: Transporter;
+  try {
+    transportador = await obterTransportador();
+  } catch {
+    return { sucesso: false, status: "FALHA_ENVIO", motivo: "FALHA_INICIALIZACAO_TRANSPORTE" };
+  }
+  const opcoes = (transportador as unknown as { options?: { jsonTransport?: boolean } }).options;
+  if (opcoes?.jsonTransport) {
+    return { sucesso: false, status: "FALHA_ENVIO", motivo: "TRANSPORTE_JSON_NAO_PERMITIDO" };
+  }
+
+  try {
+    const info = await transportador.sendMail({
+      from: '"Sonessia" <nao-responda@sonessia.com>',
+      to: destinatario,
+      subject: assunto,
+      text: texto,
+      html,
+    });
+    if (info.rejected?.length) {
+      return { sucesso: false, status: "FALHA_ENVIO", mensagemId: info.messageId, motivo: "DESTINATARIO_REJEITADO" };
+    }
+    const aceito = Array.isArray(info.accepted) && info.accepted.some((dest) =>
+      typeof dest === "string"
+        ? dest.toLowerCase() === destinatario.toLowerCase()
+        : (dest as { address?: string }).address?.toLowerCase() === destinatario.toLowerCase()
+    );
+    if (!aceito || typeof info.response !== "string" || !info.response.trim().startsWith("250")) {
+      return { sucesso: false, status: "INCERTO", mensagemId: info.messageId, motivo: "RESPOSTA_SMTP_SEM_CONFIRMACAO" };
+    }
+    return { sucesso: true, status: "ENVIADO", mensagemId: info.messageId };
+  } catch (erro) {
+    const mensagem = erro instanceof Error ? erro.message : String(erro);
+    return {
+      sucesso: false,
+      status: /timeout|timed out|ETIMEDOUT|ESOCKET/i.test(mensagem) ? "INCERTO" : "FALHA_ENVIO",
+      motivo: /timeout|timed out|ETIMEDOUT|ESOCKET/i.test(mensagem) ? "TIMEOUT_RESPOSTA_SERVIDOR" : "ERRO_DISPARO_SMTP",
+    };
+  }
+}
+
+export async function enviarEmailSolicitacaoExclusaoConta(
+  parametros: ParametrosEmailExclusaoConta
+): Promise<ResultadoEnvioEmail> {
+  if (interceptadorExclusaoContaTeste) return interceptadorExclusaoContaTeste(parametros);
+  const nome = escaparHtml(parametros.nome);
+  const origemConfigurada = ambiente.FRONTEND_ORIGIN ||
+    (ambiente.NODE_ENV === "production" ? "" : "http://localhost:5173");
+  const origemFrontend = origemConfigurada.replace(/\/+$/, "");
+  const linkRecuperacao = origemFrontend ? `${origemFrontend}/login?recuperarConta=1` : "";
+  const linkRecuperacaoHtml = escaparHtml(linkRecuperacao);
+  const instrucaoRecuperacao = linkRecuperacao
+    ? `Acesse ${linkRecuperacao}, entre com seu e-mail e senha e siga o fluxo de recuperação.`
+    : "Abra o Sonessia, acesse a tela de login e entre com seu e-mail e senha para iniciar a recuperação.";
+  const ctaHtml = linkRecuperacao
+    ? `<p style="margin:28px 0"><a href="${linkRecuperacaoHtml}" style="background:#4f46e5;color:#fff;padding:13px 20px;border-radius:6px;text-decoration:none;font-weight:bold">Não fui eu que solicitei — recuperar minha conta</a></p>`
+    : "";
+  const dataAmigavel = new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "long", timeStyle: "short", timeZone: "UTC",
+  }).format(parametros.exclusaoDefinitivaEm) + " UTC";
+  const dataIso = parametros.exclusaoDefinitivaEm.toISOString();
+  return enviarEmailConta(
+    parametros.destinatario,
+    "Solicitação de exclusão da conta — Sonessia",
+    `Olá, ${parametros.nome}!\n\nRecebemos uma solicitação para excluir sua conta Sonessia. A conta foi desativada imediatamente e ficará indisponível durante o período pendente.\n\nA exclusão definitiva está prevista para ${dataAmigavel} (${dataIso}). Você tem 30 dias, até essa data, para recuperar a conta. ${instrucaoRecuperacao} ${linkRecuperacao ? "O link apenas abre a tela; não reativa a conta automaticamente." : ""}\n\nSe nenhuma ação for tomada até o prazo, a exclusão definitiva será processada.`,
+    `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#18181b"><h2>Solicitação de exclusão da conta Sonessia</h2><p>Olá, <strong>${nome}</strong>!</p><p>Recebemos uma solicitação para excluir sua conta. Ela foi desativada imediatamente e ficará indisponível durante o período de exclusão pendente.</p><p>A exclusão definitiva está prevista para <strong>${dataAmigavel} (UTC)</strong>.</p><p>Você tem 30 dias para recuperar a conta. ${linkRecuperacao ? "Use o botão abaixo" : "Abra o Sonessia e acesse a tela de login"}, entre com seu e-mail e senha e siga as instruções. Abrir o link não altera o estado da conta.</p>${ctaHtml}<p>Se nenhuma ação for tomada até <strong>${dataAmigavel} (UTC)</strong>, a exclusão definitiva será processada.</p><p style="color:#71717a;font-size:13px">Data exata: ${dataIso}</p></div>`
+  );
+}
+
+export async function enviarEmailConfirmacaoReativacaoConta(
+  parametros: ParametrosEmailReativacaoConta
+): Promise<ResultadoEnvioEmail> {
+  if (interceptadorReativacaoContaTeste) return interceptadorReativacaoContaTeste(parametros);
+  const nome = escaparHtml(parametros.nome);
+  return enviarEmailConta(
+    parametros.destinatario,
+    "Conta reativada — Sonessia",
+    `Olá, ${parametros.nome}!\n\nSua conta Sonessia foi reativada e a solicitação de exclusão foi cancelada. Para voltar a usar a conta, entre novamente com seu e-mail e senha.\n\nSe você não reconhece esta ação, altere sua senha e entre em contato com o suporte Sonessia.`,
+    `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#18181b"><h2>Conta reativada — Sonessia</h2><p>Olá, <strong>${nome}</strong>!</p><p>Sua conta foi reativada e a solicitação de exclusão foi cancelada.</p><p>Para voltar a usar o Sonessia, entre novamente com seu e-mail e senha.</p><p>Se você não reconhece esta ação, altere sua senha e entre em contato com o suporte Sonessia.</p></div>`
+  );
 }

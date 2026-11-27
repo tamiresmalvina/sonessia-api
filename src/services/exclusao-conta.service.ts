@@ -4,6 +4,10 @@ import { Perfil, StatusSessao } from "../../generated/prisma/enums.js";
 import { AppError } from "../errors/app.error.js";
 import { excluirRecursoFotoPerfil } from "./foto-perfil.service.js";
 import {
+  enviarEmailConfirmacaoReativacaoConta,
+  enviarEmailSolicitacaoExclusaoConta,
+} from "../utils/email.util.js";
+import {
   HASH_FICTICIO_ARGON2ID,
   verificarSenha,
 } from "../utils/senha.util.js";
@@ -19,6 +23,20 @@ const LIMITE_CONTAS_POR_CICLO = 20;
 
 const MENSAGEM_REATIVACAO_NEUTRA =
   "Se os dados corresponderem a uma conta pendente e elegível, a solicitação será processada.";
+
+async function registrarFalhaEnvioEmail(
+  tipo: "EXCLUSAO" | "REATIVACAO",
+  envio: () => ReturnType<typeof enviarEmailSolicitacaoExclusaoConta>
+): Promise<void> {
+  try {
+    const resultado = await envio();
+    if (!resultado.sucesso) {
+      console.error(`[EMAIL_${tipo}_CONTA_FALHA]: Não foi possível confirmar o envio do e-mail.`, resultado.status, resultado.motivo);
+    }
+  } catch {
+    console.error(`[EMAIL_${tipo}_CONTA_FALHA]: O serviço de e-mail falhou inesperadamente.`);
+  }
+}
 
 export interface ResultadoSolicitacaoExclusao {
   exclusaoDefinitivaEm: Date;
@@ -67,6 +85,9 @@ export async function solicitarExclusaoConta(
         senha: true,
         perfil: true,
         exclusaoDefinitivaEm: true,
+        nome: true,
+        email: true,
+        emailVerificado: true,
       },
     });
 
@@ -134,10 +155,23 @@ export async function solicitarExclusaoConta(
       },
     });
 
-    return { exclusaoDefinitivaEm };
+    return {
+      exclusaoDefinitivaEm,
+      nome: usuarioAtual.nome,
+      email: usuarioAtual.email,
+      emailVerificado: usuarioAtual.emailVerificado,
+    };
   });
 
-  return resultado;
+  if (resultado.emailVerificado) {
+    await registrarFalhaEnvioEmail("EXCLUSAO", () => enviarEmailSolicitacaoExclusaoConta({
+      destinatario: resultado.email,
+      nome: resultado.nome,
+      exclusaoDefinitivaEm: resultado.exclusaoDefinitivaEm,
+    }));
+  }
+
+  return { exclusaoDefinitivaEm: resultado.exclusaoDefinitivaEm };
 }
 
 export async function reativarConta(
@@ -148,6 +182,8 @@ export async function reativarConta(
     where: { email: dados.email },
     select: {
       id: true,
+      nome: true,
+      email: true,
       senha: true,
       perfil: true,
       emailVerificado: true,
@@ -170,12 +206,14 @@ export async function reativarConta(
     return { mensagem: MENSAGEM_REATIVACAO_NEUTRA };
   }
 
-  await prisma.$transaction(async (tx) => {
+  const reativada = await prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Usuario" WHERE id = ${usuario.id}::uuid FOR UPDATE`;
     const usuarioAtual = await tx.usuario.findUnique({
       where: { id: usuario.id },
       select: {
         senha: true,
+        nome: true,
+        email: true,
         perfil: true,
         emailVerificado: true,
         exclusaoDefinitivaEm: true,
@@ -190,7 +228,7 @@ export async function reativarConta(
       !usuarioAtual.exclusaoDefinitivaEm ||
       usuarioAtual.exclusaoDefinitivaEm <= agora
     ) {
-      return;
+      return null;
     }
 
     await tx.usuario.update({
@@ -207,7 +245,15 @@ export async function reativarConta(
       where: { idUsuario: usuario.id },
       data: { status: StatusSessao.REVOGADA },
     });
+    return { nome: usuarioAtual.nome, email: usuarioAtual.email };
   });
+
+  if (reativada) {
+    await registrarFalhaEnvioEmail("REATIVACAO", () => enviarEmailConfirmacaoReativacaoConta({
+      destinatario: reativada.email,
+      nome: reativada.nome,
+    }));
+  }
 
   return { mensagem: MENSAGEM_REATIVACAO_NEUTRA };
 }

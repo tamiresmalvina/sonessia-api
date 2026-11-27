@@ -1328,7 +1328,8 @@ export async function autenticarUsuario(dados: EntradaLogin): Promise<RespostaAu
     throw new AppError(
       403,
       "CONTA_EXCLUSAO_PENDENTE",
-      "A conta está pendente de exclusão. Reative-a antes de entrar."
+      "A conta está pendente de exclusão. Reative-a antes de entrar.",
+      [{ exclusaoDefinitivaEm: usuario.exclusaoDefinitivaEm.toISOString() }]
     );
   }
 

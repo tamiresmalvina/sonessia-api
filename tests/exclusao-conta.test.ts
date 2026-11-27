@@ -17,6 +17,10 @@ import {
 import { emitirTokenAcesso } from "../src/utils/jwt.util.js";
 import { gerarHashSenha } from "../src/utils/senha.util.js";
 import { gerarHashToken } from "../src/utils/token.util.js";
+import {
+  definirInterceptadorExclusaoContaTeste,
+  definirInterceptadorReativacaoContaTeste,
+} from "../src/utils/email.util.js";
 import { garantirBancoTestesIsolado } from "./helpers/isolamento-banco.helper.js";
 
 describe("Exclusão e reativação de conta", () => {
@@ -41,6 +45,8 @@ describe("Exclusão e reativação de conta", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    definirInterceptadorExclusaoContaTeste(null);
+    definirInterceptadorReativacaoContaTeste(null);
     resetarConfiguracaoCloudinaryParaTestes();
 
     if (!idsUsuariosCriados.length) {
@@ -223,6 +229,45 @@ describe("Exclusão e reativação de conta", () => {
     );
   });
 
+  it("envia e-mail de exclusão com a data persistida e mantém a solicitação se o SMTP falhar", async () => {
+    const usuario = await criarUsuario();
+    const enviar = vi.fn().mockResolvedValue({ sucesso: true, status: "ENVIADO" });
+    definirInterceptadorExclusaoContaTeste(enviar);
+    const resposta = await solicitarExclusao(usuario.id, usuario.versaoToken);
+    expect(resposta.status).toBe(202);
+    expect(enviar).toHaveBeenCalledOnce();
+    expect(enviar.mock.calls[0]?.[0]).toMatchObject({
+      destinatario: usuario.email,
+      nome: usuario.nome,
+      exclusaoDefinitivaEm: new Date(resposta.body.exclusaoDefinitivaEm),
+    });
+
+    const outroUsuario = await criarUsuario();
+    definirInterceptadorExclusaoContaTeste(vi.fn().mockResolvedValue({
+      sucesso: false, status: "FALHA_ENVIO", motivo: "SMTP indisponível",
+    }));
+    const falhaEmail = await solicitarExclusao(outroUsuario.id, outroUsuario.versaoToken);
+    expect(falhaEmail.status).toBe(202);
+    expect((await prisma.usuario.findUnique({ where: { id: outroUsuario.id } }))?.exclusaoDefinitivaEm)
+      .toEqual(new Date(falhaEmail.body.exclusaoDefinitivaEm));
+  });
+
+  it("retorna a data ISO da exclusão pendente somente após senha correta", async () => {
+    const usuario = await criarUsuario();
+    const pedido = await solicitarExclusao(usuario.id, usuario.versaoToken);
+    const correto = await request(app).post("/autenticacao/login").send({ email: usuario.email, senha });
+    const incorreto = await request(app).post("/autenticacao/login")
+      .send({ email: usuario.email, senha: "SenhaErrada@123" });
+    expect(correto.status).toBe(403);
+    expect(correto.body.erro.codigo).toBe("CONTA_EXCLUSAO_PENDENTE");
+    expect(correto.body.erro.detalhes).toEqual([
+      { exclusaoDefinitivaEm: pedido.body.exclusaoDefinitivaEm },
+    ]);
+    expect(incorreto.status).toBe(401);
+    expect(incorreto.body.erro.codigo).toBe("CREDENCIAIS_INVALIDAS");
+    expect(JSON.stringify(incorreto.body)).not.toContain("exclusaoDefinitivaEm");
+  });
+
   it("rejeita conta ADMIN, senha incorreta, confirmação incorreta e ausência de autenticação", async () => {
     const administrador = await criarUsuario(Perfil.ADMIN);
     const comum = await criarUsuario();
@@ -292,6 +337,21 @@ describe("Exclusão e reativação de conta", () => {
     expect(atualizado?.exclusaoSolicitadaEm).toBeNull();
     expect(atualizado?.exclusaoDefinitivaEm).toBeNull();
     expect(atualizado?.versaoToken).toBe(usuario.versaoToken + 2);
+  });
+
+  it("envia e-mail de reativação apenas depois do sucesso confirmado no banco", async () => {
+    const usuario = await criarUsuario();
+    await solicitarExclusao(usuario.id, usuario.versaoToken);
+    const enviar = vi.fn().mockResolvedValue({ sucesso: true, status: "ENVIADO" });
+    definirInterceptadorReativacaoContaTeste(enviar);
+
+    await request(app).post("/autenticacao/reativar-conta").send({ email: usuario.email, senha });
+    expect(enviar).toHaveBeenCalledOnce();
+    expect(enviar.mock.calls[0]?.[0]).toMatchObject({ destinatario: usuario.email, nome: usuario.nome });
+
+    await request(app).post("/autenticacao/reativar-conta")
+      .send({ email: usuario.email, senha: "SenhaErrada@123" });
+    expect(enviar).toHaveBeenCalledOnce();
   });
 
   it("não reativa a conta quando o prazo de 30 dias já expirou", async () => {

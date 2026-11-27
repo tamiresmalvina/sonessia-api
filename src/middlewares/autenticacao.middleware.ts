@@ -56,6 +56,7 @@ export async function autenticar(
       select: {
         id: true,
         nome: true,
+        dataNascimento: true,
         email: true,
         perfil: true,
         emailVerificado: true,

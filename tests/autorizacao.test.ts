@@ -23,6 +23,7 @@ describe("Autorização RBAC — Middleware exigirPerfil", () => {
           req.usuario = {
             id: "user-admin-uuid",
             nome: "Usuário Admin Teste",
+            dataNascimento: new Date("1990-01-01T00:00:00.000Z"),
             email: "admin@teste.com",
             perfil: Perfil.ADMIN,
             emailVerificado: true,
@@ -35,6 +36,7 @@ describe("Autorização RBAC — Middleware exigirPerfil", () => {
           req.usuario = {
             id: "user-comum-uuid",
             nome: "Usuário Comum Teste",
+            dataNascimento: new Date("1990-01-01T00:00:00.000Z"),
             email: "comum@teste.com",
             perfil: Perfil.COMUM,
             emailVerificado: true,

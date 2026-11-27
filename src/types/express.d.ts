@@ -3,6 +3,7 @@ import type { Perfil } from "../../generated/prisma/enums.js";
 export interface UsuarioAutenticado {
   id: string;
   nome: string;
+  dataNascimento: Date;
   email: string;
   perfil: Perfil;
   emailVerificado: boolean;

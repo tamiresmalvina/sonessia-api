@@ -143,6 +143,7 @@ export async function obterUsuarioAtual(
       usuario: {
         id: req.usuario.id,
         nome: req.usuario.nome,
+        dataNascimento: req.usuario.dataNascimento,
         email: req.usuario.email,
         perfil: req.usuario.perfil,
         fotoPerfil: req.usuario.fotoPerfilPublicId

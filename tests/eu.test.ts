@@ -54,6 +54,7 @@ describe("Middleware de Autenticação e Consulta de Usuário — GET /autentica
       usuario: {
         id: usuario.id,
         nome: usuario.nome,
+        dataNascimento: usuario.dataNascimento.toISOString(),
         email: usuario.email,
         perfil: "COMUM",
         fotoPerfil: null,

@@ -1,5 +1,6 @@
-import rateLimit from "express-rate-limit";
+import { ipKeyGenerator, rateLimit } from "express-rate-limit";
 import { ambiente } from "../config/ambiente.js";
+import { obterIpCliente } from "../utils/ip-cliente.util.js";
 
 const respostaPadraoRateLimit = {
   erro: {
@@ -9,189 +10,48 @@ const respostaPadraoRateLimit = {
   },
 };
 
-export const limiteCadastro = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
+const JANELA_RATE_LIMIT_MS = 15 * 60 * 1000;
 
-export const limiteVerificacao = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 15,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
+export function chaveRateLimitPorIp(req: Parameters<typeof obterIpCliente>[0]): string {
+  const ip = obterIpCliente(req);
+  return ip === "unknown" ? ip : ipKeyGenerator(ip);
+}
 
-export const limiteReenvio = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
+function criarLimitador(limite: number) {
+  return rateLimit({
+    windowMs: JANELA_RATE_LIMIT_MS,
+    limit: limite,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: chaveRateLimitPorIp,
+    skip: () => ambiente.NODE_ENV === "test",
+    handler: (_req, res) => {
+      res.status(429).json(respostaPadraoRateLimit);
+    },
+  });
+}
 
-export const limiteSolicitarAlteracaoEmail = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
+export const limiteCadastro = criarLimitador(10);
+export const limiteVerificacao = criarLimitador(15);
+export const limiteReenvio = criarLimitador(5);
+export const limiteSolicitarAlteracaoEmail = criarLimitador(5);
+export const limiteConfirmarAlteracaoEmail = criarLimitador(10);
+export const limiteReenviarCodigoAlteracaoEmail = criarLimitador(6);
+export const limiteCancelarAlteracaoEmail = criarLimitador(5);
+export const limiteExclusaoConta = criarLimitador(5);
+export const limiteReativacaoConta = criarLimitador(5);
+export const limiteLogin = criarLimitador(10);
+export const limiteLogout = criarLimitador(30);
+export const limiteRenovacaoSessao = criarLimitador(30);
+export const limiteOperacaoAutenticada = criarLimitador(300);
+export const limiteSolicitacaoRecuperacao = criarLimitador(5);
+export const limiteRedefinicaoSenha = criarLimitador(10);
+export const limiteAlteracaoSenha = criarLimitador(5);
+export const limiteUploadFotoPerfil = criarLimitador(10);
+export const limiteVisualizacaoFotoPerfil = criarLimitador(60);
+export const limiteRemocaoFotoPerfil = criarLimitador(10);
 
-export const limiteConfirmarAlteracaoEmail = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
-
-export const limiteReenviarCodigoAlteracaoEmail = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 6,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
-
-export const limiteCancelarAlteracaoEmail = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
-
-export const limiteExclusaoConta = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
-
-export const limiteReativacaoConta = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
-
-export const limiteLogin = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
-
-export const limiteRenovacaoSessao = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
-
-export const limiteSolicitacaoRecuperacao = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
-
-export const limiteRedefinicaoSenha = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
-
-export const limiteAlteracaoSenha = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
-
-export const limiteUploadFotoPerfil = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
-
-export const limiteVisualizacaoFotoPerfil = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
-
-export const limiteRemocaoFotoPerfil = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => ambiente.NODE_ENV === "test",
-  handler: (_req, res) => {
-    res.status(429).json(respostaPadraoRateLimit);
-  },
-});
+// Limite geral para mutações administrativas e limite mais restrito para uploads
+// que podem gerar custos externos de armazenamento/processamento.
+export const limiteOperacaoAdministrativa = criarLimitador(60);
+export const limiteUploadConteudo = criarLimitador(10);

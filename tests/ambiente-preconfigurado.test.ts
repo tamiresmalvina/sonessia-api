@@ -84,6 +84,16 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
     return emitirTokenAcesso({ sub: usuario.id, versaoToken: usuario.versaoToken });
   }
 
+  async function idCategoriaAmbiente(nome = "Foco"): Promise<string> {
+    const categoria = await prisma.categoria.findUnique({
+      where: { nome_tipo: { nome, tipo: "AMBIENTE" } },
+    });
+    if (!categoria?.ativa) {
+      throw new Error(`A categoria de ambiente ativa "${nome}" precisa existir no banco de testes.`);
+    }
+    return categoria.idCategoria;
+  }
+
   async function criarAudio(idUsuario: string, titulo: string, idCategoria?: string) {
     if (!idCategoria) {
       const cat = await prisma.categoria.findFirst({ where: { tipo: "AUDIO" } });
@@ -151,6 +161,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
       const ambienteCriado = await prisma.ambienteSonoro.create({
         data: {
           idUsuario: admin.id,
+          idCategoria: await idCategoriaAmbiente(),
           nome: "Ambiente de listagem",
           origem: "preconfigurado",
         },
@@ -179,7 +190,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .send({
           nome: "Refúgio da Manhã",
           descricao: "Ambiente pré-configurado para foco e estudo",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           publicado: true,
           audios: [
             { idAudio: audio1.idAudio, volume: 60 },
@@ -192,7 +203,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
       const ambiente = resposta.body.ambiente;
       expect(ambiente).toHaveProperty("idAmbienteSonoro");
       expect(ambiente.nome).toBe("Refúgio da Manhã");
-      expect(ambiente.finalidade).toBe("ESTUDO");
+      expect(ambiente.categoria).toBe("Foco");
       expect(ambiente.origem).toBe("preconfigurado");
       expect(ambiente.publicado).toBe(true);
       expect(ambiente.audios).toHaveLength(2);
@@ -216,7 +227,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .field("metadados", JSON.stringify({
           nome: "Chuva Visual",
-          finalidade: "RELAXAMENTO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           autorImagem: "Autor",
           licencaImagem: "CC0",
           audios: [{ idAudio: audio.idAudio, volume: 55 }],
@@ -243,7 +254,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Ambiente Repetido",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [
             { idAudio: audio1.idAudio, volume: 50 },
             { idAudio: audio2.idAudio, volume: 80 },
@@ -256,7 +267,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Ambiente Repetido",
-          finalidade: "SONO",
+          idCategoria: await idCategoriaAmbiente("Sono"),
           audios: [
             { idAudio: audio2.idAudio, volume: 80 },
             { idAudio: audio1.idAudio, volume: 50 },
@@ -275,7 +286,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Base",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
       expect(base.status).toBe(201);
@@ -285,7 +296,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Outra capa",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
       expect(nomeDiferente.status).toBe(201);
@@ -295,7 +306,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Base",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 51 }],
         });
       expect(volumeDiferente.status).toBe(201);
@@ -310,7 +321,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(comum)}`)
         .send({
           nome: "Tentativa de Admin",
-          finalidade: "CONCENTRACAO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
 
@@ -323,7 +334,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .post("/ambientes-sonoros/pre-configurados")
         .send({
           nome: "Sem Token",
-          finalidade: "CONCENTRACAO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: randomUUID(), volume: 50 }],
         });
 
@@ -340,7 +351,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Ambiente com Áudio Fantasma",
-          finalidade: "RELAXAMENTO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           audios: [{ idAudio: idInexistente, volume: 50 }],
         });
 
@@ -357,7 +368,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Duplicado",
-          finalidade: "RELAXAMENTO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           audios: [
             { idAudio: audio.idAudio, volume: 30 },
             { idAudio: audio.idAudio, volume: 70 },
@@ -369,7 +380,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Volume Inválido",
-          finalidade: "RELAXAMENTO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           audios: [{ idAudio: audio.idAudio, volume: 150 }],
         });
 
@@ -389,7 +400,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Ambiente Próprio",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 45 }],
         });
       expect(criacao.status).toBe(201);
@@ -412,7 +423,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Mesmo nome",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
       const segunda = await request(app)
@@ -420,7 +431,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Nome diferente",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 60 }],
         });
       expect(segunda.status).toBe(201);
@@ -478,7 +489,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .send({
           nome: "Praia Deserta",
           descricao: "Sons do litoral",
-          finalidade: "RELAXAMENTO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           audios: [{ idAudio: audio1.idAudio, volume: 50 }],
         });
 
@@ -490,7 +501,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .send({
           nome: "Praia Tropical",
           descricao: "Sons de praia com gaivotas",
-          finalidade: "MEDITACAO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           audios: [
             { idAudio: audio1.idAudio, volume: 70 },
             { idAudio: audio2.idAudio, volume: 30 },
@@ -499,7 +510,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
 
       expect(edicao.status).toBe(200);
       expect(edicao.body.ambiente.nome).toBe("Praia Tropical");
-      expect(edicao.body.ambiente.finalidade).toBe("MEDITACAO");
+      expect(edicao.body.ambiente.categoria).toBe("Relaxamento");
       expect(edicao.body.ambiente.audios).toHaveLength(2);
     });
 
@@ -512,7 +523,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Acampamento Noturno",
-          finalidade: "SONO",
+          idCategoria: await idCategoriaAmbiente("Sono"),
           publicado: false,
           audios: [{ idAudio: audio.idAudio, volume: 45 }],
         });
@@ -559,7 +570,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Floresta Densa",
-          finalidade: "MEDITACAO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           publicado: true,
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
@@ -597,7 +608,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Chuva Zen",
-          finalidade: "RELAXAMENTO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           publicado: true,
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
@@ -608,7 +619,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Chuva Tempestuosa Rascunho",
-          finalidade: "RELAXAMENTO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           publicado: false,
           audios: [{ idAudio: audio.idAudio, volume: 80 }],
         });
@@ -632,7 +643,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(comum)}`)
         .send({
           nome: "Ambiente Secreto de Comum",
-          finalidade: "CONCENTRACAO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 40 }],
         });
 
@@ -654,7 +665,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Brisa Marítima Publicada",
-          finalidade: "MEDITACAO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           publicado: true,
           audios: [{ idAudio: audio.idAudio, volume: 55 }],
         });
@@ -666,7 +677,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Brisa Oculta",
-          finalidade: "MEDITACAO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           publicado: false,
           audios: [{ idAudio: audio.idAudio, volume: 55 }],
         });
@@ -685,7 +696,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
       expect(consultaDespublicada.body.erro.codigo).toBe("AMBIENTE_NAO_ENCONTRADO");
     });
 
-    it("filtra ambientes públicos por finalidade corretamente", async () => {
+    it("filtra ambientes públicos por categoria corretamente", async () => {
       const admin = await criarUsuario(Perfil.ADMIN);
       const audio = await criarAudio(admin.id, "Som harmônico");
 
@@ -694,7 +705,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Ambiente Estudo Alpha",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           publicado: true,
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
@@ -704,40 +715,35 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Ambiente Sono Delta",
-          finalidade: "SONO",
+          idCategoria: await idCategoriaAmbiente("Sono"),
           publicado: true,
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
 
-      const filtroEstudo = await request(app).get("/ambientes-sonoros/publicos?finalidade=ESTUDO");
-      const filtroSono = await request(app).get("/ambientes-sonoros/publicos?finalidade=SONO");
+      const filtroFoco = await request(app).get(`/ambientes-sonoros/publicos?idCategoria=${await idCategoriaAmbiente("Foco")}`);
+      const filtroSono = await request(app).get(`/ambientes-sonoros/publicos?idCategoria=${await idCategoriaAmbiente("Sono")}`);
 
-      expect(filtroEstudo.status).toBe(200);
-      expect(filtroEstudo.body.ambientes.every((a: { finalidade: string }) => a.finalidade === "ESTUDO")).toBe(true);
-      expect(filtroEstudo.body.ambientes.some((a: { nome: string }) => a.nome === "Ambiente Estudo Alpha")).toBe(true);
+      expect(filtroFoco.status).toBe(200);
+      expect(filtroFoco.body.ambientes.every((a: { categoria: string }) => a.categoria === "Foco")).toBe(true);
+      expect(filtroFoco.body.ambientes.some((a: { nome: string }) => a.nome === "Ambiente Estudo Alpha")).toBe(true);
 
       expect(filtroSono.status).toBe(200);
-      expect(filtroSono.body.ambientes.every((a: { finalidade: string }) => a.finalidade === "SONO")).toBe(true);
+      expect(filtroSono.body.ambientes.every((a: { categoria: string }) => a.categoria === "Sono")).toBe(true);
       expect(filtroSono.body.ambientes.some((a: { nome: string }) => a.nome === "Ambiente Sono Delta")).toBe(true);
     });
 
-    it("rejeita filtro de finalidade inválida com HTTP 400 DADOS_INVALIDOS", async () => {
-      const resposta = await request(app).get("/ambientes-sonoros/publicos?finalidade=FINALIDADE_FAKE");
+    it("rejeita identificador de categoria inválido com HTTP 400 DADOS_INVALIDOS", async () => {
+      const resposta = await request(app).get("/ambientes-sonoros/publicos?idCategoria=categoria-invalida");
       expect(resposta.status).toBe(400);
       expect(resposta.body.erro.codigo).toBe("DADOS_INVALIDOS");
     });
 
-    it("disponibiliza consulta pública de finalidades disponíveis", async () => {
-      const resposta = await request(app).get("/ambientes-sonoros/publicos/finalidades");
+    it("disponibiliza categorias de ambiente na rota pública de categorias", async () => {
+      const resposta = await request(app).get("/categorias?tipo=AMBIENTE");
       expect(resposta.status).toBe(200);
-      expect(resposta.body.finalidades).toEqual(expect.arrayContaining([
-        "CONCENTRACAO",
-        "ESTUDO",
-        "MEDITACAO",
-        "RELAXAMENTO",
-        "SONO",
-        "TRABALHO",
-      ]));
+      expect(resposta.body.categorias.map((categoria: { nome: string }) => categoria.nome)).toEqual(
+        expect.arrayContaining(["Foco", "Sono", "Relaxamento", "Mascaramento"]),
+      );
     });
   });
 
@@ -751,7 +757,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Ambiente que será excluído",
-          finalidade: "TRABALHO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           publicado: true,
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
@@ -787,7 +793,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Ambiente Pré em Coleção",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           publicado: true,
           audios: [{ idAudio: audio.idAudio, volume: 60 }],
         });
@@ -841,7 +847,7 @@ describe("Ambientes sonoros pré-configurados e catálogo público (US02 e US08)
         .set("Authorization", `Bearer ${token(admin)}`)
         .send({
           nome: "Ambiente Via Alias",
-          finalidade: "RELAXAMENTO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           publicado: true,
           audios: [{ idAudio: audio.idAudio, volume: 75 }],
         });

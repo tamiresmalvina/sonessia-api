@@ -141,6 +141,14 @@ describe("Exclusão e reativação de conta", () => {
     return emitirTokenAcesso({ sub: idUsuario, versaoToken });
   }
 
+  async function idCategoriaAmbiente(): Promise<string> {
+    const categoria = await prisma.categoria.findUnique({
+      where: { nome_tipo: { nome: "Foco", tipo: "AMBIENTE" } },
+    });
+    if (!categoria?.ativa) throw new Error("A categoria de ambiente Foco precisa existir e estar ativa.");
+    return categoria.idCategoria;
+  }
+
   function mockRemocaoCloudinary(
     estado: "deleted" | "not found" = "deleted"
   ) {
@@ -162,6 +170,7 @@ describe("Exclusão e reativação de conta", () => {
     return prisma.ambienteSonoro.create({
       data: {
         idUsuario,
+        idCategoria: await idCategoriaAmbiente(),
         nome,
         descricao: null,
         origem: "personalizado",

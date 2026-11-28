@@ -10,7 +10,9 @@ import {
   limiteVerificacao,
   limiteReenvio,
   limiteLogin,
+  limiteLogout,
   limiteRenovacaoSessao,
+  limiteOperacaoAutenticada,
   limiteSolicitacaoRecuperacao,
   limiteRedefinicaoSenha,
   limiteAlteracaoSenha,
@@ -128,6 +130,7 @@ rotasAutenticacao.delete(
 
 rotasAutenticacao.patch(
   "/eu",
+  limiteOperacaoAutenticada,
   validarCorpo(schemaAtualizarNome),
   autenticar,
   controladorAutenticacao.atualizarNome
@@ -144,6 +147,7 @@ rotasAutenticacao.patch(
 
 rotasAutenticacao.patch(
   "/eu/data-nascimento",
+  limiteOperacaoAutenticada,
   autenticar,
   validarCorpo(schemaAtualizarDataNascimento),
   controladorAutenticacao.atualizarDataNascimento
@@ -201,6 +205,7 @@ rotasAutenticacao.post(
 
 rotasAutenticacao.post(
   "/logout",
+  limiteLogout,
   validarOrigemMutacao,
   controladorAutenticacao.logout
 );

@@ -11,6 +11,7 @@ import { autenticar } from "../middlewares/autenticacao.middleware.js";
 import { exigirPerfil } from "../middlewares/autorizacao.middleware.js";
 import { validarOrigemMutacao } from "../middlewares/origem.middleware.js";
 import { validarCorpo } from "../middlewares/validacao.middleware.js";
+import { limiteOperacaoAdministrativa } from "../middlewares/rate-limit.middleware.js";
 import {
   schemaAtualizarCategoria,
   schemaCriarCategoria,
@@ -37,6 +38,7 @@ function exigirAdminParaInativas(req: Request, res: Response, next: NextFunction
 rotasCategorias.get("/", exigirAdminParaInativas, listarCategorias);
 rotasCategorias.post(
   "/",
+  limiteOperacaoAdministrativa,
   validarOrigemMutacao,
   ...protegerAdmin,
   validarCorpo(schemaCriarCategoria),
@@ -44,11 +46,12 @@ rotasCategorias.post(
 );
 rotasCategorias.patch(
   "/:id",
+  limiteOperacaoAdministrativa,
   validarOrigemMutacao,
   ...protegerAdmin,
   validarCorpo(schemaAtualizarCategoria),
   atualizarCategoria
 );
-rotasCategorias.delete("/:id", validarOrigemMutacao, ...protegerAdmin, excluirCategoria);
+rotasCategorias.delete("/:id", limiteOperacaoAdministrativa, validarOrigemMutacao, ...protegerAdmin, excluirCategoria);
 
 export { rotasCategorias };

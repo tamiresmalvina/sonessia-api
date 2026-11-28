@@ -6,6 +6,7 @@ import {
   NOME_COOKIE_REFRESH,
 } from "../utils/cookie.util.js";
 import { validarTokenParaLogout } from "../utils/jwt.util.js";
+import { obterIpCliente } from "../utils/ip-cliente.util.js";
 import { AppError } from "../errors/app.error.js";
 import {
   reativarConta as reativarContaServico,
@@ -238,7 +239,7 @@ export async function solicitarAlteracaoEmail(
     const resultado = await servicoAutenticacao.solicitarAlteracaoEmail({
       idUsuario: req.usuario.id,
       dados: req.body,
-      ipSolicitacao: req.ip ?? req.socket.remoteAddress,
+      ipSolicitacao: obterIpCliente(req),
     });
 
     res.status(202).json(resultado);

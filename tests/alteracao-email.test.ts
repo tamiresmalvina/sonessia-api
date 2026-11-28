@@ -1199,6 +1199,8 @@ describe("Alteração segura do próprio e-mail", () => {
   });
 
   it("envia por transporte SMTP somente para o destinatário e trata confirmação explícita", async () => {
+    const provedorOriginal = ambiente.EMAIL_PROVIDER;
+    (ambiente as Record<string, unknown>).EMAIL_PROVIDER = "ethereal";
     definirInterceptadorAlteracaoEmailTeste(null);
     definirForcarExecucaoEtherealEmTestes(true);
     const enviarMensagem = vi.fn(async (_opcoes: SendMailOptions) => ({
@@ -1213,25 +1215,29 @@ describe("Alteração segura do próprio e-mail", () => {
     } as unknown as Transporter;
     definirTransportadorCustomizado(transporte);
 
-    const resultado = await enviarEmailConfirmacaoAlteracaoEmail({
-      destinatario: "destino@teste.com",
-      nome: "<script>Nome</script>",
-      codigo: "123456",
-      etapa: "novo",
-    });
+    try {
+      const resultado = await enviarEmailConfirmacaoAlteracaoEmail({
+        destinatario: "destino@teste.com",
+        nome: "<script>Nome</script>",
+        codigo: "123456",
+        etapa: "novo",
+      });
 
-    expect(resultado.sucesso).toBe(true);
-    expect(resultado.status).toBe("ENVIADO");
-    expect(enviarMensagem).toHaveBeenCalledOnce();
-    const mensagem = enviarMensagem.mock.calls[0]?.[0];
-    expect(mensagem?.to).toBe("destino@teste.com");
-    expect(mensagem?.text).toContain("123456");
-    expect(mensagem?.text).toContain("10 minutos");
-    expect(mensagem?.text).not.toContain("http");
-    expect(mensagem?.html).toContain("123456");
-    expect(mensagem?.html).toContain("10 minutos");
-    expect(mensagem?.html).not.toContain("<a");
-    expect(mensagem?.html).not.toContain("<script>");
-    expect(mensagem?.html).toContain("&lt;script&gt;");
+      expect(resultado.sucesso).toBe(true);
+      expect(resultado.status).toBe("ENVIADO");
+      expect(enviarMensagem).toHaveBeenCalledOnce();
+      const mensagem = enviarMensagem.mock.calls[0]?.[0];
+      expect(mensagem?.to).toBe("destino@teste.com");
+      expect(mensagem?.text).toContain("123456");
+      expect(mensagem?.text).toContain("10 minutos");
+      expect(mensagem?.text).not.toContain("http");
+      expect(mensagem?.html).toContain("123456");
+      expect(mensagem?.html).toContain("10 minutos");
+      expect(mensagem?.html).not.toContain("<a");
+      expect(mensagem?.html).not.toContain("<script>");
+      expect(mensagem?.html).toContain("&lt;script&gt;");
+    } finally {
+      (ambiente as Record<string, unknown>).EMAIL_PROVIDER = provedorOriginal;
+    }
   });
 });

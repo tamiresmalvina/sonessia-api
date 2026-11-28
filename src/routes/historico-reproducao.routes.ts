@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { registrarReproducao, listarReproducoesRecentes } from "../controllers/historico-reproducao.controller.js";
 import { autenticar } from "../middlewares/autenticacao.middleware.js";
+import { limiteOperacaoAutenticada } from "../middlewares/rate-limit.middleware.js";
 import { validarOrigemMutacao } from "../middlewares/origem.middleware.js";
 import { validarCorpo } from "../middlewares/validacao.middleware.js";
 import { schemaRegistrarReproducao } from "../schemas/historico-reproducao.schema.js";
@@ -9,6 +10,7 @@ const rotasHistoricoReproducao = Router();
 
 rotasHistoricoReproducao.post(
   "/",
+  limiteOperacaoAutenticada,
   validarOrigemMutacao,
   autenticar,
   validarCorpo(schemaRegistrarReproducao),

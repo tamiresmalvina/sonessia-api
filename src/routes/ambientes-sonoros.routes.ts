@@ -27,6 +27,11 @@ import {
   schemaCriarAmbienteSonoro,
   schemaPublicacaoAmbiente,
 } from "../schemas/ambiente-sonoro.schema.js";
+import {
+  limiteOperacaoAdministrativa,
+  limiteOperacaoAutenticada,
+  limiteUploadConteudo,
+} from "../middlewares/rate-limit.middleware.js";
 
 const rotasAmbientesSonoros = Router();
 const protegerAdmin = [autenticar, exigirPerfil(Perfil.ADMIN)];
@@ -44,6 +49,8 @@ rotasAmbientesSonoros.get("/publicos/:idAmbienteSonoro", obterAmbientePublico);
 
 rotasAmbientesSonoros.post(
   "/pre-configurados",
+  limiteOperacaoAdministrativa,
+  limiteUploadConteudo,
   validarOrigemMutacao,
   ...protegerAdmin,
   receberImagemAmbiente,
@@ -65,6 +72,8 @@ rotasAmbientesSonoros.get(
 
 rotasAmbientesSonoros.patch(
   "/pre-configurados/:idAmbienteSonoro",
+  limiteOperacaoAdministrativa,
+  limiteUploadConteudo,
   validarOrigemMutacao,
   ...protegerAdmin,
   receberImagemAmbiente,
@@ -74,6 +83,8 @@ rotasAmbientesSonoros.patch(
 
 rotasAmbientesSonoros.put(
   "/pre-configurados/:idAmbienteSonoro",
+  limiteOperacaoAdministrativa,
+  limiteUploadConteudo,
   validarOrigemMutacao,
   ...protegerAdmin,
   receberImagemAmbiente,
@@ -83,6 +94,7 @@ rotasAmbientesSonoros.put(
 
 rotasAmbientesSonoros.patch(
   "/pre-configurados/:idAmbienteSonoro/publicacao",
+  limiteOperacaoAdministrativa,
   validarOrigemMutacao,
   ...protegerAdmin,
   validarCorpo(schemaPublicacaoAmbiente),
@@ -91,6 +103,7 @@ rotasAmbientesSonoros.patch(
 
 rotasAmbientesSonoros.delete(
   "/pre-configurados/:idAmbienteSonoro",
+  limiteOperacaoAdministrativa,
   validarOrigemMutacao,
   ...protegerAdmin,
   excluirAmbientePreConfigurado
@@ -102,6 +115,8 @@ rotasAmbientesSonoros.delete(
 
 rotasAmbientesSonoros.post(
   "/",
+  limiteOperacaoAutenticada,
+  limiteUploadConteudo,
   validarOrigemMutacao,
   autenticar,
   receberImagemAmbiente,
@@ -115,6 +130,7 @@ rotasAmbientesSonoros.get("/:idAmbienteSonoro", autenticar, obterAmbienteSonoro)
 
 rotasAmbientesSonoros.patch(
   "/:idAmbienteSonoro",
+  limiteOperacaoAutenticada,
   validarOrigemMutacao,
   autenticar,
   validarCorpo(schemaAtualizarAmbienteSonoro),
@@ -123,6 +139,7 @@ rotasAmbientesSonoros.patch(
 
 rotasAmbientesSonoros.put(
   "/:idAmbienteSonoro",
+  limiteOperacaoAutenticada,
   validarOrigemMutacao,
   autenticar,
   validarCorpo(schemaAtualizarAmbienteSonoro),
@@ -131,6 +148,7 @@ rotasAmbientesSonoros.put(
 
 rotasAmbientesSonoros.delete(
   "/:idAmbienteSonoro",
+  limiteOperacaoAutenticada,
   validarOrigemMutacao,
   autenticar,
   excluirAmbienteSonoro

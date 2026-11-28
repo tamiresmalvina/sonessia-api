@@ -294,7 +294,11 @@ describe("Envio de E-mail — Provedor Ethereal e Validações de Transporte", (
 });
 
 describe("Envio de E-mail — Provedor Mailpit e Regras de Seleção/Bloqueio", () => {
+  let provedorOriginal: typeof ambiente.EMAIL_PROVIDER;
+
   beforeEach(() => {
+    provedorOriginal = ambiente.EMAIL_PROVIDER;
+    (ambiente as Record<string, unknown>).EMAIL_PROVIDER = "mailpit";
     definirInterceptadorEmailTeste(null);
     definirTransportadorCustomizado(null);
     resetarTransportadorEthereal();
@@ -303,6 +307,7 @@ describe("Envio de E-mail — Provedor Mailpit e Regras de Seleção/Bloqueio", 
   });
 
   afterEach(() => {
+    (ambiente as Record<string, unknown>).EMAIL_PROVIDER = provedorOriginal;
     definirInterceptadorEmailTeste(null);
     definirTransportadorCustomizado(null);
     resetarTransportadorEthereal();
@@ -328,7 +333,7 @@ describe("Envio de E-mail — Provedor Mailpit e Regras de Seleção/Bloqueio", 
     expect(config.MAILPIT_PORT).toBe(1025);
   });
 
-  it("valida que o schema aceita somente 'ethereal' ou 'mailpit' como provedores de e-mail", () => {
+  it("valida os provedores Ethereal, Mailpit e Gmail", () => {
     const baseValida = {
       NODE_ENV: "development",
       PORT: "3000",
@@ -346,7 +351,59 @@ describe("Envio de E-mail — Provedor Mailpit e Regras de Seleção/Bloqueio", 
     const configMailpit = validarAmbiente({ ...baseValida, EMAIL_PROVIDER: "mailpit" });
     expect(configMailpit.EMAIL_PROVIDER).toBe("mailpit");
 
+    const configGmail = validarAmbiente({
+      ...baseValida,
+      EMAIL_PROVIDER: "gmail",
+      EMAIL_FROM: "sonessia.teste@gmail.com",
+      SMTP_USER: "sonessia.teste@gmail.com",
+      SMTP_PASS: "abcdefghijklmnop",
+    });
+    expect(configGmail.EMAIL_PROVIDER).toBe("gmail");
+    expect(configGmail.SMTP_HOST).toBe("smtp.gmail.com");
+    expect(configGmail.SMTP_PORT).toBe(587);
+
     expect(() => validarAmbiente({ ...baseValida, EMAIL_PROVIDER: "sendgrid" })).toThrowError(/EMAIL_PROVIDER/);
+  });
+
+  it.each([
+    ["EMAIL_FROM", undefined],
+    ["EMAIL_FROM", "remetente-invalido"],
+    ["SMTP_USER", undefined],
+    ["SMTP_USER", "usuario-invalido"],
+    ["SMTP_PASS", undefined],
+    ["SMTP_PASS", "curta"],
+    ["SMTP_HOST", "smtp.example.net"],
+    ["SMTP_PORT", "465"],
+  ])("rejeita configuração Gmail inválida em %s sem expor valores", (campo, valor) => {
+    const dados = {
+      NODE_ENV: "development",
+      DATABASE_URL: "postgresql://localhost:5432/sonessia",
+      JWT_ACCESS_SECRET: "chave-secreta-forte-para-testes-123456",
+      JWT_ISSUER: "sonessia-api",
+      JWT_AUDIENCE: "sonessia-web",
+      ACCESS_TOKEN_TTL: "15m",
+      REFRESH_TOKEN_TTL_DAYS: "7",
+      EMAIL_PROVIDER: "gmail",
+      EMAIL_FROM: "sonessia.teste@gmail.com",
+      SMTP_USER: "sonessia.teste@gmail.com",
+      SMTP_PASS: "abcdefghijklmnop",
+      [campo]: valor,
+    };
+    expect(() => validarAmbiente(dados)).toThrowError(new RegExp(campo));
+  });
+
+  it("exige host, porta, remetente e credenciais Gmail explícitos e válidos", () => {
+    const dados = {
+      NODE_ENV: "development",
+      DATABASE_URL: "postgresql://localhost:5432/sonessia",
+      JWT_ACCESS_SECRET: "chave-secreta-forte-para-testes-123456",
+      JWT_ISSUER: "sonessia-api",
+      JWT_AUDIENCE: "sonessia-web",
+      ACCESS_TOKEN_TTL: "15m",
+      REFRESH_TOKEN_TTL_DAYS: "7",
+      EMAIL_PROVIDER: "gmail",
+    };
+    expect(() => validarAmbiente(dados)).toThrowError(/EMAIL_FROM.*SMTP_USER.*SMTP_PASS/);
   });
 
   it("inicializa o transporte Mailpit com host localhost, porta 1025 e sem TLS por padrão", async () => {
@@ -650,6 +707,128 @@ describe("Envio de E-mail — Provedor Mailpit e Regras de Seleção/Bloqueio", 
     const mensagem = enviarMensagem.mock.calls[0]?.[0] as { text: string; html: string };
     expect(mensagem.text).toContain("solicitação de exclusão foi cancelada");
     expect(mensagem.html).toContain("entre em contato com o suporte");
+  });
+});
+
+describe("Envio de E-mail — Gmail SMTP", () => {
+  const camposAmbiente = ["NODE_ENV", "EMAIL_PROVIDER", "EMAIL_FROM", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS"] as const;
+  let valoresOriginais: Record<string, unknown>;
+
+  beforeEach(() => {
+    valoresOriginais = Object.fromEntries(camposAmbiente.map((campo) => [campo, ambiente[campo]]));
+    (ambiente as Record<string, unknown>).NODE_ENV = "development";
+    (ambiente as Record<string, unknown>).EMAIL_PROVIDER = "gmail";
+    (ambiente as Record<string, unknown>).EMAIL_FROM = "sonessia.teste@gmail.com";
+    (ambiente as Record<string, unknown>).SMTP_HOST = "smtp.gmail.com";
+    (ambiente as Record<string, unknown>).SMTP_PORT = 587;
+    (ambiente as Record<string, unknown>).SMTP_USER = "sonessia.teste@gmail.com";
+    (ambiente as Record<string, unknown>).SMTP_PASS = "abcd efgh ijkl mnop";
+    definirInterceptadorEmailTeste(null);
+    definirTransportadorCustomizado(null);
+    resetarTransportadorEthereal();
+    definirForcarExecucaoEtherealEmTestes(true);
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    for (const campo of camposAmbiente) {
+      (ambiente as Record<string, unknown>)[campo] = valoresOriginais[campo];
+    }
+    definirInterceptadorEmailTeste(null);
+    definirTransportadorCustomizado(null);
+    resetarTransportadorEthereal();
+    definirForcarExecucaoEtherealEmTestes(false);
+    vi.restoreAllMocks();
+  });
+
+  it("cria o transporte Gmail com smtp.gmail.com, porta 587, STARTTLS e auth", async () => {
+    const transporte = { options: {}, sendMail: vi.fn() } as unknown as Transporter;
+    const criarTransporte = vi.spyOn(nodemailer, "createTransport").mockReturnValue(transporte);
+    const criarContaEthereal = vi.spyOn(nodemailer, "createTestAccount");
+
+    await obterTransportador();
+
+    expect(criarTransporte).toHaveBeenCalledWith({
+      host: "smtp.gmail.com",
+      port: 587,
+      secure: false,
+      requireTLS: true,
+      auth: { user: "sonessia.teste@gmail.com", pass: "abcdefghijklmnop" },
+    });
+    expect(criarContaEthereal).not.toHaveBeenCalled();
+  });
+
+  it("usa EMAIL_FROM no envio e permite Gmail SMTP em produção", async () => {
+    (ambiente as Record<string, unknown>).NODE_ENV = "production";
+    const enviarMensagem = vi.fn().mockResolvedValue({
+      messageId: "gmail-mock-id",
+      accepted: ["destinatario@teste.com"],
+      rejected: [],
+      response: "250 2.0.0 queued",
+    });
+    definirTransportadorCustomizado({ options: {}, sendMail: enviarMensagem } as unknown as Transporter);
+
+    const resultado = await enviarEmailVerificacao({
+      destinatario: "destinatario@teste.com",
+      nome: "Pessoa",
+      codigo: "123456",
+    });
+
+    expect(resultado.sucesso).toBe(true);
+    expect(enviarMensagem.mock.calls[0]?.[0]).toMatchObject({
+      from: '"Sonessia" <sonessia.teste@gmail.com>',
+      to: "destinatario@teste.com",
+    });
+  });
+
+  it("trata falha de conexão sem expor a senha SMTP em resultado ou logs", async () => {
+    (ambiente as Record<string, unknown>).NODE_ENV = "production";
+    const senha = "abcd efgh ijkl mnop";
+    const erro = `ECONNREFUSED; credencial ${senha}`;
+    const enviarMensagem = vi.fn().mockRejectedValue(new Error(erro));
+    const registrarErro = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    definirTransportadorCustomizado({ options: {}, sendMail: enviarMensagem } as unknown as Transporter);
+
+    const resultado = await enviarEmailVerificacao({
+      destinatario: "destinatario@teste.com",
+      nome: "Pessoa",
+      codigo: "123456",
+    });
+
+    expect(resultado.sucesso).toBe(false);
+    expect(JSON.stringify(resultado)).not.toContain(senha);
+    expect(JSON.stringify(registrarErro.mock.calls)).not.toContain(senha);
+  });
+
+  it("trata falha de envio SMTP sem incluir a senha em mensagens de erro", async () => {
+    (ambiente as Record<string, unknown>).NODE_ENV = "production";
+    const enviarMensagem = vi.fn().mockRejectedValue(new Error("SMTP authentication failed"));
+    definirTransportadorCustomizado({ options: {}, sendMail: enviarMensagem } as unknown as Transporter);
+
+    const resultado = await enviarEmailVerificacao({
+      destinatario: "destinatario@teste.com",
+      nome: "Pessoa",
+      codigo: "123456",
+    });
+
+    expect(resultado.sucesso).toBe(false);
+    expect(resultado.motivo).toBe("ERRO_DISPARO_SMTP");
+    expect(JSON.stringify(resultado)).not.toContain("abcdefghijklmnop");
+  });
+
+  it("não tenta enviar por Gmail durante testes automatizados", async () => {
+    (ambiente as Record<string, unknown>).NODE_ENV = "test";
+    const enviarMensagem = vi.fn();
+    definirTransportadorCustomizado({ options: {}, sendMail: enviarMensagem } as unknown as Transporter);
+
+    const resultado = await enviarEmailVerificacao({
+      destinatario: "destinatario@teste.com",
+      nome: "Pessoa",
+      codigo: "123456",
+    });
+
+    expect(resultado.sucesso).toBe(true);
+    expect(enviarMensagem).not.toHaveBeenCalled();
   });
 });
 

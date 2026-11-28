@@ -13,6 +13,7 @@ describe("Configuração e Validação do Cloudinary (src/config/cloudinary.ts e
   const baseAmbienteValido = {
     NODE_ENV: "development",
     PORT: "3000",
+    FRONTEND_ORIGIN: "https://app.sonessia.com",
     DATABASE_URL: "postgresql://usuario:senha@localhost:5432/sonessia",
     JWT_ACCESS_SECRET: "chave-secreta-forte-para-testes-123456",
     JWT_ISSUER: "sonessia-api",

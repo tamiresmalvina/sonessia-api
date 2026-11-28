@@ -90,6 +90,14 @@ describe("Gerenciamento de Coleções Sonoras (US06)", () => {
     return emitirTokenAcesso({ sub: usuario.id, versaoToken: usuario.versaoToken });
   }
 
+  async function idCategoriaAmbiente(): Promise<string> {
+    const categoria = await prisma.categoria.findUnique({
+      where: { nome_tipo: { nome: "Foco", tipo: "AMBIENTE" } },
+    });
+    if (!categoria?.ativa) throw new Error("A categoria de ambiente Foco precisa existir e estar ativa.");
+    return categoria.idCategoria;
+  }
+
   async function criarAudio(idUsuario: string, titulo: string) {
     let cat = await prisma.categoria.findFirst({ where: { tipo: "AUDIO" } });
     if (!cat) {
@@ -117,6 +125,7 @@ describe("Gerenciamento de Coleções Sonoras (US06)", () => {
     const ambiente = await prisma.ambienteSonoro.create({
       data: {
         idUsuario,
+        idCategoria: await idCategoriaAmbiente(),
         nome,
         descricao: `Descrição de ${nome}`,
         origem: "personalizado",
@@ -138,6 +147,7 @@ describe("Gerenciamento de Coleções Sonoras (US06)", () => {
     const ambiente = await prisma.ambienteSonoro.create({
       data: {
         idUsuario: idAdmin,
+        idCategoria: await idCategoriaAmbiente(),
         nome,
         descricao: `Descrição de ${nome}`,
         origem: "preconfigurado",

@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import { ambiente } from "./config/ambiente.js";
+import { criarMiddlewareCabecalhosSeguranca } from "./middlewares/cabecalhos-seguranca.middleware.js";
 import { tratadorDeErros } from "./middlewares/erro.middleware.js";
 import { rotasAutenticacao } from "./routes/autenticacao.routes.js";
 import { rotasAudios } from "./routes/audios.routes.js";
@@ -12,6 +13,11 @@ import { rotasHistoricoReproducao } from "./routes/historico-reproducao.routes.j
 
 const app = express();
 
+// Encaminhados não são confiáveis por padrão. Rate limits resolvem o IP Render
+// separadamente usando apenas CF-Connecting-IP quando TRUST_PROXY_MODE=render.
+app.set("trust proxy", false);
+
+app.use(criarMiddlewareCabecalhosSeguranca(ambiente.NODE_ENV === "production"));
 app.use(express.json());
 app.use(cookieParser());
 

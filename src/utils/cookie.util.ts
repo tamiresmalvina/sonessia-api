@@ -4,10 +4,11 @@ import { ambiente } from "../config/ambiente.js";
 export const NOME_COOKIE_REFRESH = "refreshToken";
 
 export function obterOpcoesCookieRefresh(persistente = true): CookieOptions {
+  const emProducao = ambiente.NODE_ENV === "production";
   const opcoes: CookieOptions = {
     httpOnly: true,
-    secure: ambiente.NODE_ENV === "production",
-    sameSite: "lax",
+    secure: emProducao,
+    sameSite: emProducao ? "none" : "lax",
     path: "/autenticacao",
   };
 
@@ -27,10 +28,5 @@ export function definirCookieRefresh(
 }
 
 export function limparCookieRefresh(res: Response): void {
-  res.clearCookie(NOME_COOKIE_REFRESH, {
-    httpOnly: true,
-    secure: ambiente.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/autenticacao",
-  });
+  res.clearCookie(NOME_COOKIE_REFRESH, obterOpcoesCookieRefresh(false));
 }

@@ -11,6 +11,7 @@ import {
   reordenarAmbientesColecao,
 } from "../controllers/colecao.controller.js";
 import { autenticar } from "../middlewares/autenticacao.middleware.js";
+import { limiteOperacaoAutenticada } from "../middlewares/rate-limit.middleware.js";
 import { exigirPerfil } from "../middlewares/autorizacao.middleware.js";
 import { validarOrigemMutacao } from "../middlewares/origem.middleware.js";
 import { validarCorpo } from "../middlewares/validacao.middleware.js";
@@ -26,6 +27,7 @@ const protegerComum = [autenticar, exigirPerfil(Perfil.COMUM)];
 
 rotasColecoes.post(
   "/",
+  limiteOperacaoAutenticada,
   validarOrigemMutacao,
   ...protegerComum,
   validarCorpo(schemaCriarColecao),
@@ -38,6 +40,7 @@ rotasColecoes.get("/:idColecao", ...protegerComum, obterColecao);
 
 rotasColecoes.patch(
   "/:idColecao",
+  limiteOperacaoAutenticada,
   validarOrigemMutacao,
   ...protegerComum,
   validarCorpo(schemaAtualizarColecao),
@@ -46,6 +49,7 @@ rotasColecoes.patch(
 
 rotasColecoes.put(
   "/:idColecao",
+  limiteOperacaoAutenticada,
   validarOrigemMutacao,
   ...protegerComum,
   validarCorpo(schemaAtualizarColecao),
@@ -54,6 +58,7 @@ rotasColecoes.put(
 
 rotasColecoes.delete(
   "/:idColecao",
+  limiteOperacaoAutenticada,
   validarOrigemMutacao,
   ...protegerComum,
   excluirColecao
@@ -61,6 +66,7 @@ rotasColecoes.delete(
 
 rotasColecoes.post(
   "/:idColecao/ambientes",
+  limiteOperacaoAutenticada,
   validarOrigemMutacao,
   ...protegerComum,
   validarCorpo(schemaAdicionarAmbienteColecao),
@@ -69,6 +75,7 @@ rotasColecoes.post(
 
 rotasColecoes.put(
   "/:idColecao/ambientes/ordem",
+  limiteOperacaoAutenticada,
   validarOrigemMutacao,
   ...protegerComum,
   validarCorpo(schemaReordenarAmbientesColecao),
@@ -77,6 +84,7 @@ rotasColecoes.put(
 
 rotasColecoes.delete(
   "/:idColecao/ambientes/:idAmbienteSonoro",
+  limiteOperacaoAutenticada,
   validarOrigemMutacao,
   ...protegerComum,
   removerAmbienteColecao

@@ -137,15 +137,30 @@ export async function obterTransportador(): Promise<Transporter> {
     return transportadorCustomizado;
   }
 
+  if (transportadorPadrao && provedorPadraoInstanciado === ambiente.EMAIL_PROVIDER) {
+    return transportadorPadrao;
+  }
+
+  if (ambiente.EMAIL_PROVIDER === "gmail") {
+    transportadorPadrao = nodemailer.createTransport({
+      host: ambiente.SMTP_HOST,
+      port: ambiente.SMTP_PORT,
+      secure: false,
+      requireTLS: true,
+      auth: {
+        user: ambiente.SMTP_USER,
+        pass: ambiente.SMTP_PASS?.replace(/\s/g, ""),
+      },
+    });
+    provedorPadraoInstanciado = "gmail";
+    return transportadorPadrao;
+  }
+
   if (ambiente.NODE_ENV === "production") {
     const nomeProvedor = ambiente.EMAIL_PROVIDER === "mailpit" ? "Mailpit" : "Ethereal";
     throw new Error(
       `O provedor ${nomeProvedor} não é permitido em ambiente de produção. Configure um transporte de e-mail de produção.`
     );
-  }
-
-  if (transportadorPadrao && provedorPadraoInstanciado === ambiente.EMAIL_PROVIDER) {
-    return transportadorPadrao;
   }
 
   if (ambiente.EMAIL_PROVIDER === "mailpit") {
@@ -175,6 +190,12 @@ export async function obterTransportador(): Promise<Transporter> {
   return transportadorPadrao;
 }
 
+function obterRemetenteEmail(): string {
+  return ambiente.EMAIL_FROM
+    ? `"Sonessia" <${ambiente.EMAIL_FROM}>`
+    : '"Sonessia" <nao-responda@sonessia.com>';
+}
+
 export async function enviarEmailVerificacao(
   parametros: ParametrosEnvioCodigo
 ): Promise<ResultadoEnvioEmail> {
@@ -184,7 +205,7 @@ export async function enviarEmailVerificacao(
   }
 
   // Em ambiente de teste sem forçar execução do provedor Ethereal, simula sucesso sem chamadas de rede
-  if (ambiente.NODE_ENV === "test" && !forcarExecucaoEtherealEmTestes) {
+  if (ambiente.NODE_ENV === "test" && (!forcarExecucaoEtherealEmTestes || ambiente.EMAIL_PROVIDER === "gmail")) {
     return {
       sucesso: true,
       status: "ENVIADO",
@@ -193,7 +214,7 @@ export async function enviarEmailVerificacao(
   }
 
   // Em ambiente de produção, impede expressamente o uso de Ethereal e Mailpit
-  if (ambiente.NODE_ENV === "production" && !transportadorCustomizado) {
+  if (ambiente.NODE_ENV === "production" && !transportadorCustomizado && ambiente.EMAIL_PROVIDER !== "gmail") {
     const ehMailpit = ambiente.EMAIL_PROVIDER === "mailpit";
     console.error(
       `[ERRO_EMAIL_PRODUCAO]: O provedor ${ehMailpit ? "Mailpit" : "Ethereal"} não é permitido em ambiente de produção.`
@@ -211,15 +232,18 @@ export async function enviarEmailVerificacao(
   } catch (erro) {
     const ehMailpit = ambiente.EMAIL_PROVIDER === "mailpit";
     console.error(
-      ehMailpit
-        ? "[ERRO_MAILPIT_INICIALIZACAO]: Não foi possível inicializar o transporte Mailpit."
-        : "[ERRO_ETHEREAL_CONTA]: Não foi possível inicializar a conta Ethereal.",
-      erro instanceof Error ? erro.message : erro
+      ambiente.EMAIL_PROVIDER === "gmail"
+        ? "[ERRO_GMAIL_SMTP_INICIALIZACAO]: Não foi possível inicializar o transporte Gmail SMTP."
+        : ehMailpit
+          ? "[ERRO_MAILPIT_INICIALIZACAO]: Não foi possível inicializar o transporte Mailpit."
+          : "[ERRO_ETHEREAL_CONTA]: Não foi possível inicializar a conta Ethereal."
     );
     return {
       sucesso: false,
       status: "FALHA_ENVIO",
-      motivo: ehMailpit ? "FALHA_INICIALIZACAO_MAILPIT" : "FALHA_INICIALIZACAO_ETHEREAL",
+      motivo: ambiente.EMAIL_PROVIDER === "gmail"
+        ? "FALHA_INICIALIZACAO_GMAIL_SMTP"
+        : ehMailpit ? "FALHA_INICIALIZACAO_MAILPIT" : "FALHA_INICIALIZACAO_ETHEREAL",
     };
   }
 
@@ -237,7 +261,7 @@ export async function enviarEmailVerificacao(
     const nomeHtml = escaparHtml(parametros.nome);
 
     const info = await transportador.sendMail({
-      from: '"Sonessia" <nao-responda@sonessia.com>',
+      from: obterRemetenteEmail(),
       to: parametros.destinatario,
       subject: "Código de Verificação de E-mail — Sonessia",
       text: `Olá, ${parametros.nome}!\n\nSeu código de verificação é: ${parametros.codigo}\n\nEste código expira em 15 minutos.\nSe você não solicitou este código, por favor ignore este e-mail.`,
@@ -314,8 +338,7 @@ export async function enviarEmailVerificacao(
     const mensagemErro = erro instanceof Error ? erro.message : String(erro);
     const ehMailpit = ambiente.EMAIL_PROVIDER === "mailpit";
     console.error(
-      `[ERRO_ENVIO_EMAIL]: Falha ao disparar o e-mail pelo ${ehMailpit ? "Mailpit" : "Ethereal"}.`,
-      mensagemErro
+      `[ERRO_ENVIO_EMAIL]: Falha ao disparar o e-mail pelo ${ambiente.EMAIL_PROVIDER === "gmail" ? "Gmail SMTP" : ehMailpit ? "Mailpit" : "Ethereal"}.`
     );
 
     // Se o erro ocorreu durante o diálogo após conexão iniciada, o resultado pode ser incerto
@@ -337,7 +360,7 @@ export async function enviarEmailRecuperacaoSenha(
   }
 
   // Em ambiente de teste sem forçar execução do provedor Ethereal, simula sucesso sem chamadas de rede
-  if (ambiente.NODE_ENV === "test" && !forcarExecucaoEtherealEmTestes) {
+  if (ambiente.NODE_ENV === "test" && (!forcarExecucaoEtherealEmTestes || ambiente.EMAIL_PROVIDER === "gmail")) {
     return {
       sucesso: true,
       status: "ENVIADO",
@@ -346,7 +369,7 @@ export async function enviarEmailRecuperacaoSenha(
   }
 
   // Em ambiente de produção, impede expressamente o uso de Ethereal e Mailpit
-  if (ambiente.NODE_ENV === "production" && !transportadorCustomizado) {
+  if (ambiente.NODE_ENV === "production" && !transportadorCustomizado && ambiente.EMAIL_PROVIDER !== "gmail") {
     const ehMailpit = ambiente.EMAIL_PROVIDER === "mailpit";
     console.error(
       `[ERRO_EMAIL_PRODUCAO]: O provedor ${ehMailpit ? "Mailpit" : "Ethereal"} não é permitido em ambiente de produção.`
@@ -364,15 +387,18 @@ export async function enviarEmailRecuperacaoSenha(
   } catch (erro) {
     const ehMailpit = ambiente.EMAIL_PROVIDER === "mailpit";
     console.error(
-      ehMailpit
-        ? "[ERRO_MAILPIT_INICIALIZACAO]: Não foi possível inicializar o transporte Mailpit."
-        : "[ERRO_ETHEREAL_CONTA]: Não foi possível inicializar a conta Ethereal.",
-      erro instanceof Error ? erro.message : erro
+      ambiente.EMAIL_PROVIDER === "gmail"
+        ? "[ERRO_GMAIL_SMTP_INICIALIZACAO]: Não foi possível inicializar o transporte Gmail SMTP."
+        : ehMailpit
+          ? "[ERRO_MAILPIT_INICIALIZACAO]: Não foi possível inicializar o transporte Mailpit."
+          : "[ERRO_ETHEREAL_CONTA]: Não foi possível inicializar a conta Ethereal."
     );
     return {
       sucesso: false,
       status: "FALHA_ENVIO",
-      motivo: ehMailpit ? "FALHA_INICIALIZACAO_MAILPIT" : "FALHA_INICIALIZACAO_ETHEREAL",
+      motivo: ambiente.EMAIL_PROVIDER === "gmail"
+        ? "FALHA_INICIALIZACAO_GMAIL_SMTP"
+        : ehMailpit ? "FALHA_INICIALIZACAO_MAILPIT" : "FALHA_INICIALIZACAO_ETHEREAL",
     };
   }
 
@@ -392,7 +418,7 @@ export async function enviarEmailRecuperacaoSenha(
     const linkRedefinicao = `${origemFrontend}/redefinir-senha?token=${encodeURIComponent(parametros.token)}`;
 
     const info = await transportador.sendMail({
-      from: '"Sonessia" <nao-responda@sonessia.com>',
+      from: obterRemetenteEmail(),
       to: parametros.destinatario,
       subject: "Recuperação de Senha — Sonessia",
       text: `Olá, ${parametros.nome}!\n\nRecebemos uma solicitação para redefinir a sua senha no Sonessia.\n\nPara cadastrar uma nova senha, acesse o link a seguir:\n${linkRedefinicao}\n\nEste link é de uso único e expira em 15 minutos.\nSe você não solicitou a redefinição de sua senha, ignore este e-mail. Sua senha permanecerá inalterada.`,
@@ -472,8 +498,7 @@ export async function enviarEmailRecuperacaoSenha(
     const mensagemErro = erro instanceof Error ? erro.message : String(erro);
     const ehMailpit = ambiente.EMAIL_PROVIDER === "mailpit";
     console.error(
-      `[ERRO_ENVIO_EMAIL]: Falha ao disparar o e-mail pelo ${ehMailpit ? "Mailpit" : "Ethereal"}.`,
-      mensagemErro
+      `[ERRO_ENVIO_EMAIL]: Falha ao disparar o e-mail pelo ${ambiente.EMAIL_PROVIDER === "gmail" ? "Gmail SMTP" : ehMailpit ? "Mailpit" : "Ethereal"}.`
     );
 
     const ehTimeout = /timeout|timed out|ETIMEDOUT|ESOCKET/i.test(mensagemErro);
@@ -492,7 +517,7 @@ export async function enviarEmailConfirmacaoAlteracaoEmail(
     return await interceptadorAlteracaoEmailTeste(parametros);
   }
 
-  if (ambiente.NODE_ENV === "test" && !forcarExecucaoEtherealEmTestes) {
+  if (ambiente.NODE_ENV === "test" && (!forcarExecucaoEtherealEmTestes || ambiente.EMAIL_PROVIDER === "gmail")) {
     return {
       sucesso: true,
       status: "ENVIADO",
@@ -500,7 +525,7 @@ export async function enviarEmailConfirmacaoAlteracaoEmail(
     };
   }
 
-  if (ambiente.NODE_ENV === "production" && !transportadorCustomizado) {
+  if (ambiente.NODE_ENV === "production" && !transportadorCustomizado && ambiente.EMAIL_PROVIDER !== "gmail") {
     return {
       sucesso: false,
       status: "FALHA_ENVIO",
@@ -512,10 +537,7 @@ export async function enviarEmailConfirmacaoAlteracaoEmail(
   try {
     transportador = await obterTransportador();
   } catch (erro) {
-    console.error(
-      "[ERRO_TRANSPORTE_ALTERACAO_EMAIL]: Não foi possível inicializar o transporte de e-mail.",
-      erro instanceof Error ? erro.message : erro
-    );
+    console.error("[ERRO_TRANSPORTE_ALTERACAO_EMAIL]: Não foi possível inicializar o transporte de e-mail.");
     return {
       sucesso: false,
       status: "FALHA_ENVIO",
@@ -548,7 +570,7 @@ export async function enviarEmailConfirmacaoAlteracaoEmail(
       : `Olá, ${parametros.nome}!\n\nPara confirmar que você controla este novo endereço de e-mail, informe este código de 6 dígitos na plataforma: ${parametros.codigo}\n\nEste código expira em 10 minutos e pode ser usado uma única vez. Se você não solicitou a alteração, ignore esta mensagem.`;
 
     const info = await transportador.sendMail({
-      from: '"Sonessia" <nao-responda@sonessia.com>',
+      from: obterRemetenteEmail(),
       to: parametros.destinatario,
       subject: assunto,
       text: texto,
@@ -635,7 +657,7 @@ export async function enviarNotificacaoAlteracaoEmailConcluida(
     return await interceptadorNotificacaoAlteracaoEmailTeste(parametros);
   }
 
-  if (ambiente.NODE_ENV === "test" && !forcarExecucaoEtherealEmTestes) {
+  if (ambiente.NODE_ENV === "test" && (!forcarExecucaoEtherealEmTestes || ambiente.EMAIL_PROVIDER === "gmail")) {
     return {
       sucesso: true,
       status: "ENVIADO",
@@ -643,7 +665,7 @@ export async function enviarNotificacaoAlteracaoEmailConcluida(
     };
   }
 
-  if (ambiente.NODE_ENV === "production" && !transportadorCustomizado) {
+  if (ambiente.NODE_ENV === "production" && !transportadorCustomizado && ambiente.EMAIL_PROVIDER !== "gmail") {
     return {
       sucesso: false,
       status: "FALHA_ENVIO",
@@ -655,10 +677,7 @@ export async function enviarNotificacaoAlteracaoEmailConcluida(
   try {
     transportador = await obterTransportador();
   } catch (erro) {
-    console.error(
-      "[ERRO_TRANSPORTE_ALTERACAO_EMAIL]: Não foi possível inicializar o transporte de e-mail.",
-      erro instanceof Error ? erro.message : erro
-    );
+    console.error("[ERRO_TRANSPORTE_ALTERACAO_EMAIL]: Não foi possível inicializar o transporte de e-mail.");
     return {
       sucesso: false,
       status: "FALHA_ENVIO",
@@ -680,7 +699,7 @@ export async function enviarNotificacaoAlteracaoEmailConcluida(
   try {
     const nomeHtml = escaparHtml(parametros.nome);
     const info = await transportador.sendMail({
-      from: '"Sonessia" <nao-responda@sonessia.com>',
+      from: obterRemetenteEmail(),
       to: parametros.destinatario,
       subject: "Alteração de e-mail concluída — Sonessia",
       text: `Olá, ${parametros.nome}!\n\nO endereço de e-mail associado à sua conta Sonessia foi alterado com sucesso. Se você não reconhece esta alteração, entre em contato com o suporte.`,
@@ -755,10 +774,10 @@ async function enviarEmailConta(
   texto: string,
   html: string
 ): Promise<ResultadoEnvioEmail> {
-  if (ambiente.NODE_ENV === "test" && !forcarExecucaoEtherealEmTestes) {
+  if (ambiente.NODE_ENV === "test" && (!forcarExecucaoEtherealEmTestes || ambiente.EMAIL_PROVIDER === "gmail")) {
     return { sucesso: true, status: "ENVIADO", mensagemId: "mock-test-conta-id" };
   }
-  if (ambiente.NODE_ENV === "production" && !transportadorCustomizado) {
+  if (ambiente.NODE_ENV === "production" && !transportadorCustomizado && ambiente.EMAIL_PROVIDER !== "gmail") {
     return { sucesso: false, status: "FALHA_ENVIO", motivo: "PROVEDOR_NAO_PERMITIDO_EM_PRODUCAO" };
   }
 
@@ -775,7 +794,7 @@ async function enviarEmailConta(
 
   try {
     const info = await transportador.sendMail({
-      from: '"Sonessia" <nao-responda@sonessia.com>',
+      from: obterRemetenteEmail(),
       to: destinatario,
       subject: assunto,
       text: texto,

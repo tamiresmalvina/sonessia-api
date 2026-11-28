@@ -70,6 +70,16 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
     return emitirTokenAcesso({ sub: usuario.id, versaoToken: usuario.versaoToken });
   }
 
+  async function idCategoriaAmbiente(nome = "Foco"): Promise<string> {
+    const categoria = await prisma.categoria.findUnique({
+      where: { nome_tipo: { nome, tipo: "AMBIENTE" } },
+    });
+    if (!categoria?.ativa) {
+      throw new Error(`A categoria de ambiente ativa "${nome}" precisa existir no banco de testes.`);
+    }
+    return categoria.idCategoria;
+  }
+
   async function criarAudio(idUsuario: string, titulo: string, idCategoria?: string) {
     if (!idCategoria) {
       const cat = await prisma.categoria.findFirst({ where: { tipo: "AUDIO" } });
@@ -129,7 +139,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .send({
           nome: "Chuva para dormir",
           descricao: "Ambiente tranquilo de chuva",
-          finalidade: "SONO",
+          idCategoria: await idCategoriaAmbiente("Sono"),
           audios: [
             {
               idAudio: audioChuva.idAudio,
@@ -144,7 +154,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
       expect(ambiente).toHaveProperty("idAmbienteSonoro");
       expect(ambiente.nome).toBe("Chuva para dormir");
       expect(ambiente.descricao).toBe("Ambiente tranquilo de chuva");
-      expect(ambiente.finalidade).toBe("SONO");
+      expect(ambiente.categoria).toBe("Sono");
       expect(ambiente.origem).toBe("personalizado");
 
       // Não deve vazar informações internas
@@ -183,7 +193,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
           nome: "Tempestade Noturna",
-          finalidade: "RELAXAMENTO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           audios: [
             { idAudio: audioChuva.idAudio, volume: 80 },
             { idAudio: audioTrovao.idAudio, volume: 40 },
@@ -212,7 +222,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuarioA)}`)
         .send({
           nome: "Ambiente A",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audioCompartilhado.idAudio, volume: 50 }],
         });
 
@@ -222,7 +232,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuarioB)}`)
         .send({
           nome: "Ambiente B",
-          finalidade: "MEDITACAO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           audios: [{ idAudio: audioCompartilhado.idAudio, volume: 80 }],
         });
 
@@ -271,7 +281,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
           nome: "Ambiente Inválido",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: idInexistente, volume: 50 }],
         });
 
@@ -288,7 +298,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
           nome: "Ambiente com Duplicados",
-          finalidade: "RELAXAMENTO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           audios: [
             { idAudio: audio.idAudio, volume: 50 },
             { idAudio: audio.idAudio, volume: 75 },
@@ -309,7 +319,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
           nome: "Volume Negativo",
-          finalidade: "CONCENTRACAO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: -1 }],
         });
 
@@ -318,7 +328,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
           nome: "Volume Acima",
-          finalidade: "CONCENTRACAO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 101 }],
         });
 
@@ -327,7 +337,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
           nome: "Volume Fracionado",
-          finalidade: "CONCENTRACAO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 55.5 }],
         });
 
@@ -349,7 +359,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
           nome: "Sem Áudios",
-          finalidade: "TRABALHO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [],
         });
 
@@ -357,7 +367,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
       expect(resposta.body.erro.codigo).toBe("DADOS_INVALIDOS");
     });
 
-    it("rejeita finalidade fora do enum Finalidade", async () => {
+    it("rejeita identificador de categoria inválido", async () => {
       const usuario = await criarUsuario();
       const audio = await criarAudio(usuario.id, "Fogueira");
 
@@ -365,8 +375,8 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .post("/ambientes-sonoros")
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
-          nome: "Finalidade Inválida",
-          finalidade: "FINALIDADE_INEXISTENTE",
+          nome: "Categoria Inválida",
+          idCategoria: "categoria-invalida",
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
 
@@ -384,7 +394,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
           nome: "Tentando forjar proprietário",
-          finalidade: "CONCENTRACAO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           idUsuario: outroUsuario.id,
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
@@ -406,7 +416,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuarioA)}`)
         .send({
           nome: "Ambiente A1",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 40 }],
         });
 
@@ -415,7 +425,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuarioA)}`)
         .send({
           nome: "Ambiente A2",
-          finalidade: "RELAXAMENTO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           audios: [{ idAudio: audio.idAudio, volume: 60 }],
         });
 
@@ -425,7 +435,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuarioB)}`)
         .send({
           nome: "Ambiente B1",
-          finalidade: "SONO",
+          idCategoria: await idCategoriaAmbiente("Sono"),
           audios: [{ idAudio: audio.idAudio, volume: 80 }],
         });
 
@@ -458,7 +468,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .send({
           nome: "Ambiente Detalhado",
           descricao: "Descrição completa do ambiente",
-          finalidade: "MEDITACAO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           audios: [{ idAudio: audio.idAudio, volume: 45 }],
         });
 
@@ -493,7 +503,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuarioA)}`)
         .send({
           nome: "Ambiente Privado de A",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
 
@@ -537,7 +547,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .send({
           nome: "Cafeteria Original",
           descricao: "Sons de cafeteria",
-          finalidade: "TRABALHO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 70 }],
         });
 
@@ -549,14 +559,14 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .send({
           nome: "Cafeteria Noturna",
           descricao: "Sons calmos de cafeteria à noite",
-          finalidade: "CONCENTRACAO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
         });
 
       expect(atualizacao.status).toBe(200);
       expect(atualizacao.body.mensagem).toBe("Ambiente sonoro atualizado com sucesso.");
       expect(atualizacao.body.ambiente.nome).toBe("Cafeteria Noturna");
       expect(atualizacao.body.ambiente.descricao).toBe("Sons calmos de cafeteria à noite");
-      expect(atualizacao.body.ambiente.finalidade).toBe("CONCENTRACAO");
+      expect(atualizacao.body.ambiente.categoria).toBe("Foco");
       expect(atualizacao.body.ambiente.audios).toHaveLength(1);
       expect(atualizacao.body.ambiente.audios[0].volume).toBe(70);
     });
@@ -572,7 +582,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
           nome: "Cabana",
-          finalidade: "RELAXAMENTO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           audios: [
             { idAudio: audio1.idAudio, volume: 50 },
             { idAudio: audio2.idAudio, volume: 30 },
@@ -623,7 +633,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuarioA)}`)
         .send({
           nome: "Ambiente do A",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
 
@@ -653,7 +663,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
           nome: "Original",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
 
@@ -681,7 +691,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
           nome: "Ambiente para Excluir",
-          finalidade: "RELAXAMENTO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           audios: [
             { idAudio: audio1.idAudio, volume: 50 },
             { idAudio: audio2.idAudio, volume: 70 },
@@ -729,7 +739,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
           nome: "Ambiente em Coleção",
-          finalidade: "ESTUDO",
+          idCategoria: await idCategoriaAmbiente("Foco"),
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
 
@@ -790,7 +800,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuarioA)}`)
         .send({
           nome: "Ambiente Protegido de A",
-          finalidade: "MEDITACAO",
+          idCategoria: await idCategoriaAmbiente("Relaxamento"),
           audios: [{ idAudio: audio.idAudio, volume: 50 }],
         });
 
@@ -821,7 +831,7 @@ describe("Gerenciamento de ambientes sonoros e composição com áudios", () => 
         .set("Authorization", `Bearer ${token(usuario)}`)
         .send({
           nome: "Noite Serena",
-          finalidade: "SONO",
+          idCategoria: await idCategoriaAmbiente("Sono"),
           audios: [{ idAudio: audio.idAudio, volume: 40 }],
         });
 

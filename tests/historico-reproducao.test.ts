@@ -57,6 +57,14 @@ describe("Histórico de reprodução de ambientes", () => {
     return emitirTokenAcesso({ sub: usuario.id, versaoToken: usuario.versaoToken });
   }
 
+  async function idCategoriaAmbiente(): Promise<string> {
+    const categoria = await prisma.categoria.findUnique({
+      where: { nome_tipo: { nome: "Foco", tipo: "AMBIENTE" } },
+    });
+    if (!categoria?.ativa) throw new Error("A categoria de ambiente Foco precisa existir e estar ativa.");
+    return categoria.idCategoria;
+  }
+
   async function criarAmbiente(
     idUsuario: string,
     opcoes: { origem?: string; publicado?: boolean; audio?: boolean } = {},
@@ -64,6 +72,7 @@ describe("Histórico de reprodução de ambientes", () => {
     const ambiente = await prisma.ambienteSonoro.create({
       data: {
         idUsuario,
+        idCategoria: await idCategoriaAmbiente(),
         nome: `Ambiente ${randomUUID()}`,
         descricao: "Descrição de teste",
         origem: opcoes.origem ?? "personalizado",
@@ -150,7 +159,8 @@ describe("Histórico de reprodução de ambientes", () => {
       nome: ambiente.nome,
       descricao: ambiente.descricao,
       imagem: ambiente.imagem,
-      finalidade: "SONO",
+      idCategoria: await idCategoriaAmbiente(),
+      categoria: "Foco",
       audios: [expect.objectContaining({ titulo: "Chuva", volume: 65 })],
     });
     expect(consulta.body.ambientes[0].ultimaReproducao).toBeDefined();

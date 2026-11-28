@@ -6,6 +6,7 @@ dist/
 .env
 .env.*
 !.env.example
+.env.production.local
 
 # Prisma Client gerado
 /generated/prisma

@@ -10,8 +10,10 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "prisma:status": "prisma migrate status --config prisma7.config.ts",
+    "prisma:deploy": "prisma migrate deploy --config prisma7.config.ts",
     "prisma:generate": "prisma generate --config prisma7.config.ts",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "seed:admins": "tsx prisma/seed-admin.ts"
   },
   "keywords": [],
   "author": "",
